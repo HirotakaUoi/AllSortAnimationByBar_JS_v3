@@ -287,6 +287,251 @@ quick_sort_select3  = functools.partial(quick_sort, option="Select3")
 quick_sort_random   = functools.partial(quick_sort, option="Random")
 
 
+# ---------------------------------------------------------------------------
+# 並列クイックソート共通部品
+# ---------------------------------------------------------------------------
+
+def _gen_partition(data, color, first, last):
+    """1回のパーティション処理をステップごとに yield するジェネレータ。
+    yield: (done: bool, parts: list[(first,last)], info: dict)
+      done=False : 処理継続中
+      done=True  : パーティション完了。parts に次の処理範囲を返す。
+    """
+    if first >= last:
+        # 要素が1個以下 → 即確定
+        if first == last:
+            color[first] = "g"
+        if last > 0:
+            color[last] = "gray"
+        yield (True, [], {"arrows": [], "texts": [], "lines": [], "bars": ([last] if last >= 0 else [])})
+        return
+
+    pivot   = data[last]
+    color[last] = "r"
+    lines   = [[pivot, first, last]]
+    texts   = [f"pivot={pivot}  [{first}..{last}]"]
+    yield (False, [], {"arrows": [], "texts": texts, "lines": lines, "bars": [last]})
+
+    i = first; j = last - 1
+    color[i] = "y"
+    if j > first:
+        color[j] = "m"
+
+    while True:
+        if i < last:   color[i] = "y"
+        if j > first:  color[j] = "m"
+        while i < last and data[i] < pivot:
+            color[i] = "b"; i += 1
+            if i < last: color[i] = "y"
+            yield (False, [], {"arrows": [], "texts": texts, "lines": lines, "bars": [i]})
+        while j >= first and data[j] > pivot:
+            color[j] = "b"; j -= 1
+            if j > first: color[j] = "m"
+            yield (False, [], {"arrows": [], "texts": texts, "lines": lines, "bars": [j]})
+        if i >= j:
+            break
+        data[i], data[j] = data[j], data[i]
+        color[i], color[j] = color[j], color[i]
+        yield (False, [], {"arrows": [[i, j]], "texts": texts, "lines": lines, "bars": [i, j]})
+        color[i] = color[j] = "b"
+        yield (False, [], {"arrows": [], "texts": texts, "lines": lines, "bars": [i, j]})
+        i += 1; j -= 1
+        yield (False, [], {"arrows": [], "texts": texts, "lines": lines, "bars": [i, j]})
+
+    # ピボットを確定位置へ
+    yield (False, [], {"arrows": [[i, last]], "texts": texts, "lines": lines, "bars": [i, last]})
+    data[i], data[last] = data[last], data[i]
+    color[i], color[last] = color[last], color[i]
+    color[i] = "g"; color[last] = "b"
+
+    # 次の処理範囲を返す
+    parts = []
+    if first <= i - 1:
+        parts.append((first, i - 1))
+    if i + 1 <= last:
+        parts.append((i + 1, last))
+
+    yield (True, parts, {"arrows": [[i, last]], "texts": texts, "lines": lines, "bars": [i, last]})
+
+
+def _quick_sort_parallel_core(data, color, max_tasks=0):
+    """並列クイックソートの共通コア。
+    max_tasks=0  : 制限なし（全ペンディングを同時実行）
+    max_tasks>=2 : 同時実行タスク数を max_tasks に制限
+    """
+    from collections import deque
+    n = len(data)
+    pending = deque([(0, n - 1)])
+    active  = []          # 実行中のジェネレータリスト
+
+    while pending or active:
+        # ペンディングからアクティブへ移動
+        while pending:
+            if max_tasks > 0 and len(active) >= max_tasks:
+                break
+            first, last = pending.popleft()
+            active.append(_gen_partition(data, color, first, last))
+
+        if not active:
+            break
+
+        # 全アクティブタスクを1ステップ進める
+        arrows, bars, texts_all, lines_all = [], [], [], []
+        new_active = []
+
+        for task in active:
+            done, parts, info = next(task)
+            arrows.extend(info["arrows"])
+            bars.extend(info["bars"])
+            texts_all.extend(info["texts"])
+            lines_all.extend(info["lines"])
+            if not done:
+                new_active.append(task)
+            else:
+                pending.extend(parts)
+
+        n_active = len(active)
+        n_pending = len(pending)
+        header = [f"並列タスク: 実行中={n_active}  待機={n_pending}"]
+        yield make_frame(data, color,
+                         arrows=arrows,
+                         bars=bars,
+                         texts=header + texts_all[:6],   # 多すぎる場合は先頭6件だけ表示
+                         lines=lines_all)
+        active = new_active
+
+    yield make_frame(data, color, finished=True)
+
+
+def quick_sort_parallel(data, color):
+    """並列クイックソート（上限なし）
+    スタックに積まれた全サブ範囲を同時並行でパーティション処理する。
+    """
+    yield from _quick_sort_parallel_core(data, color, max_tasks=0)
+
+
+def quick_sort_parallel_limited(data, color, max_tasks=4):
+    """並列クイックソート（CPU数制限付き）
+    同時に処理するパーティションを max_tasks 個に制限する。
+    max_tasks は UI のスライダーで 2〜1024 の範囲で指定できる。
+    """
+    yield from _quick_sort_parallel_core(data, color, max_tasks=max_tasks)
+
+
+def quick_sort_3way(data, color):
+    """3-way partition クイックソート (Dijkstra Dutch National Flag)
+    ピボットより小 / ピボットと等 / ピボットより大 の3領域に分割する。
+    重複値が多いデータで通常版より大幅に高速になる。
+
+    色の意味:
+      r  = 現在参照中の要素 (i ポインタ)
+      c  = ピボット未満と確定した領域 (lt 左側)
+      g  = ピボットと等しい領域 (lt..i-1)
+      m  = ピボット超過と確定した領域 (gt 右側)
+      b  = 未分類
+    """
+    n = len(data)
+    stack = [(0, n - 1)]
+
+    while stack:
+        first, last = stack.pop()
+        if first >= last:
+            # 要素が1つ以下 → 確定
+            if first == last:
+                color[first] = "g"
+                yield make_frame(data, color, bars=[first])
+            continue
+
+        # ---- ピボット: 中央値3点選択 ----
+        mid = (first + last) // 2
+        trio = sorted(
+            [(data[first], first), (data[mid], mid), (data[last], last)],
+            key=lambda x: x[0]
+        )
+        piv_idx = trio[1][1]   # 中央値のインデックス
+        pivot   = data[piv_idx]
+
+        # ピボットを先頭に移動
+        if piv_idx != first:
+            data[first], data[piv_idx] = data[piv_idx], data[first]
+            color[first], color[piv_idx] = color[piv_idx], color[first]
+            yield make_frame(data, color,
+                             arrows=[[first, piv_idx]],
+                             texts=[f"pivot={pivot}  first={first}  last={last}  (中央値選択)"],
+                             bars=[first, piv_idx])
+
+        # ---- Dutch National Flag partition ----
+        # 不変条件:
+        #   data[first .. lt-1]  < pivot  (cyan)
+        #   data[lt    .. i-1]  == pivot  (green)
+        #   data[i     .. gt]    未分類   (blue)
+        #   data[gt+1  .. last]  > pivot  (magenta)
+        lt = first   # 等値領域の左端
+        gt = last    # 未分類の右端
+        i  = first
+
+        # ピボット要素を等値領域へ
+        color[first] = "g"
+        yield make_frame(data, color,
+                         texts=[f"pivot={pivot}  lt={lt}  gt={gt}"],
+                         bars=[first])
+
+        while i <= gt:
+            texts = [f"pivot={pivot}  lt={lt}  i={i}  gt={gt}"]
+            color[i] = "r"
+            yield make_frame(data, color, texts=texts, bars=[i])
+
+            if data[i] < pivot:
+                # data[i] を lt 位置へ交換 → lt を右へ, i を右へ
+                data[lt], data[i] = data[i], data[lt]
+                color[lt], color[i] = color[i], color[lt]
+                color[lt] = "c"          # lt 位置は < pivot 確定
+                yield make_frame(data, color,
+                                 arrows=[[lt, i]],
+                                 texts=[f"pivot={pivot}  {i}→lt={lt} (<pivot)"],
+                                 bars=[lt, i])
+                color[i] = "g"           # i 位置は == pivot 領域へ
+                lt += 1
+                i  += 1
+
+            elif data[i] == pivot:
+                # そのまま等値領域を拡張
+                color[i] = "g"
+                yield make_frame(data, color,
+                                 texts=[f"pivot={pivot}  i={i} ==pivot"],
+                                 bars=[i])
+                i += 1
+
+            else:
+                # data[i] > pivot: gt 位置へ交換 → gt を左へ
+                color[gt] = "r"
+                yield make_frame(data, color,
+                                 texts=[f"pivot={pivot}  {i}→gt={gt} (>pivot)"],
+                                 bars=[i, gt])
+                data[i], data[gt] = data[gt], data[i]
+                color[i], color[gt] = color[gt], color[i]
+                color[gt] = "m"          # gt 位置は > pivot 確定
+                yield make_frame(data, color,
+                                 arrows=[[i, gt]],
+                                 texts=[f"pivot={pivot}  {i}⇄gt={gt}"],
+                                 bars=[i, gt])
+                gt -= 1
+                # i は進めない (交換で来た要素を再評価)
+
+        # 等値領域を確定色に
+        for k in range(lt, gt + 1):
+            color[k] = "g"
+        yield make_frame(data, color,
+                         texts=[f"pivot={pivot}  確定: lt={lt}..gt={gt}"],
+                         bars=list(range(lt, gt + 1)))
+
+        # 右を先にpush → 左(前半)が先に処理される (他のクイックソートと同順)
+        stack.append((gt + 1, last))
+        stack.append((first, lt - 1))
+
+    yield make_frame(data, color, finished=True)
+
+
 def bitonic_sort(data, color):
     n = len(data)
     N = math.floor(math.log(n, 2))
@@ -495,6 +740,9 @@ AlgorithmList = [
     ("クイックソート",                      quick_sort),
     ("クイックソート (3点中央値)",          quick_sort_select3),
     ("クイックソート (ランダム選択)",       quick_sort_random),
+    ("クイックソート (3-way partition)",    quick_sort_3way),
+    ("並列クイックソート (CPU数無制限)",     quick_sort_parallel),
+    ("並列クイックソート (CPU数制限)",      quick_sort_parallel_limited),
     ("バイトニックソート",                  bitonic_sort),
     ("並列バイトニックソート",              bitonic_sort_parallel),
     ("コムソート",                          comb_sort),

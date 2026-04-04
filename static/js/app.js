@@ -288,6 +288,14 @@ class SortPanel {
           <select class="sel-algo"></select>
         </label>
       </div>
+      <div class="params-row max-tasks-row" style="display:none">
+        <div class="speed-group">
+          <label>並列数</label>
+          <input type="range" class="rng-max-tasks" min="1" max="10" value="2"
+                 title="同時処理するパーティション数 (2^1〜2^10 = 2〜1024)">
+          <span class="max-tasks-value">4</span>
+        </div>
+      </div>
       <div class="params-row">
         <label>データ数
           <select class="sel-size"></select>
@@ -311,13 +319,11 @@ class SortPanel {
         <button class="btn btn-secondary btn-reset" disabled>↺ リセット</button>
       </div>
 
-      <!-- キャンバス -->
+      <!-- キャンバス + テキストオーバーレイ -->
       <div class="canvas-wrapper">
         <canvas class="sort-canvas"></canvas>
+        <div class="text-overlay">（開始ボタンを押してください）</div>
       </div>
-
-      <!-- テキストオーバーレイ -->
-      <div class="text-overlay">（開始ボタンを押してください）</div>
 
       <!-- ステータス -->
       <div class="status-bar">
@@ -348,6 +354,16 @@ class SortPanel {
       this.el.querySelector(".rng-speed").value = gSpeed;
       this._applySpeed(Number(gSpeed));
     }
+
+    this._updateMaxTasksVisibility();
+  }
+
+  /** 選択中アルゴリズムに応じて並列数スライダー行を表示/非表示 */
+  _updateMaxTasksVisibility() {
+    const algoId = Number(this.el.querySelector(".sel-algo").value);
+    const algo   = algorithms.find(a => a.id === algoId);
+    this.el.querySelector(".max-tasks-row").style.display =
+      (algo && algo.needs_max_tasks) ? "" : "none";
   }
 
   // ── イベントバインド ─────────────────────────────────────────
@@ -364,8 +380,16 @@ class SortPanel {
       this._applySpeed(Number(ev.target.value));
     });
 
+    // 並列数スライダー
+    q(".rng-max-tasks").addEventListener("input", (ev) => {
+      q(".max-tasks-value").textContent = 2 ** Number(ev.target.value);
+    });
+
     // パラメタ変更時にプレビューを更新（実行中は無視）
-    q(".sel-algo").addEventListener("change", () => { if (!this.isRunning) this._drawPreview(); });
+    q(".sel-algo").addEventListener("change", () => {
+      this._updateMaxTasksVisibility();
+      if (!this.isRunning) this._drawPreview();
+    });
     q(".sel-size").addEventListener("change", () => { if (!this.isRunning) this._drawPreview(); });
     q(".sel-cond").addEventListener("change", () => { if (!this.isRunning) this._drawPreview(); });
 
@@ -471,7 +495,15 @@ class SortPanel {
       this.sortCanvas.dataMax  = this.dataMax;
       this.sortCanvas.draw(this._lastFrame);
     } else if (!this.isRunning) {
-      this._drawPreviewOnCanvas(canvas, w, h);
+      // リサイズ時はキャッシュを再描画するだけ（新規生成して共有データを上書きしない）
+      if (this._previewCache) {
+        const pd = this._previewCache;
+        const sc = new SortCanvas(canvas, pd.numItems, pd.dataMax);
+        sc.draw({ data: pd.data, color: pd.color,
+                  arrows: [], texts: [], lines: [], bars: [], finished: false });
+      } else {
+        this._drawPreviewOnCanvas(canvas, w, h);
+      }
     }
   }
 
@@ -581,17 +613,25 @@ class SortPanel {
     const condId   = Number(this.el.querySelector(".sel-cond").value);
     const speed    = this._currentSpeed();
 
+    const maxTasks = 2 ** Number(this.el.querySelector(".rng-max-tasks").value);
+
     let info;
     try {
+      const body = {
+        algorithm_id:   algoId,
+        num_items:      numItems,
+        data_condition: condId,
+        speed:          speed,
+        max_tasks:      maxTasks,
+      };
+      // 全パネル一括適用で共有データが設定済みの場合はそれを送る
+      if (this._previewCache && this._previewCache.numItems === numItems) {
+        body.initial_data = this._previewCache.data;
+      }
       const res = await fetch("/api/start", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          algorithm_id:   algoId,
-          num_items:      numItems,
-          data_condition: condId,
-          speed:          speed,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(await res.text());
       info = await res.json();

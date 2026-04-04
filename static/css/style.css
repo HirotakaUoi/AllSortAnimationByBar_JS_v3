@@ -274,17 +274,23 @@ header h1 {
   height: 100%;     /* ラッパーいっぱいに広がる */
 }
 
-/* テキストオーバーレイ */
+/* テキストオーバーレイ (キャンバス上部に重ねて表示) */
 .text-overlay {
-  min-height: 36px;
-  background: #0f1e3a;
-  border-radius: 6px;
-  padding: 5px 10px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: rgba(10, 20, 50, 0.72);
+  padding: 4px 10px;
   font-size: .82rem;
   color: #90caf9;
   font-family: "Courier New", monospace;
   white-space: pre-wrap;
   word-break: break-all;
+  pointer-events: none;   /* マウスイベントをキャンバスに透過 */
+  border-radius: 8px 8px 0 0;
+  line-height: 1.4;
+  z-index: 1;
 }
 
 /* ステータスバー */

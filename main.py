@@ -4,11 +4,12 @@ main.py  –  FastAPI + WebSocket バックエンド
 """
 
 import asyncio
+import inspect
 import uuid
 from pathlib import Path
 from typing import Optional
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).resolve().parent
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -32,7 +33,15 @@ sessions: dict[str, dict] = {}
 
 @app.get("/api/algorithms")
 def get_algorithms():
-    return [{"id": i, "name": name} for i, (name, _) in enumerate(AlgorithmList)]
+    result = []
+    for i, (name, fn) in enumerate(AlgorithmList):
+        sig = inspect.signature(fn)
+        result.append({
+            "id":             i,
+            "name":           name,
+            "needs_max_tasks": "max_tasks" in sig.parameters,
+        })
+    return result
 
 
 @app.get("/api/datasizes")
@@ -48,8 +57,10 @@ def get_conditions():
 class StartParams(BaseModel):
     algorithm_id: int
     num_items: int
-    data_condition: int = 0   # 0=ランダム … 4=ステップ値
-    speed: float = 0.08       # 秒/フレーム
+    data_condition: int = 0          # 0=ランダム … 4=ステップ値
+    speed: float = 0.08              # 秒/フレーム
+    max_tasks: int = 0               # 0=無制限 / >=2=並列数制限（needs_max_tasks なアルゴリズム用）
+    initial_data: Optional[list[int]] = None  # フロントエンドから共有データを受け取る場合
 
 
 @app.post("/api/start")
@@ -60,10 +71,19 @@ def start_session(params: StartParams):
     num_items = params.num_items
     data_max  = 300 if num_items > 150 else 100
 
-    data, color = make_data(num_items, data_max, params.data_condition)
+    if params.initial_data and len(params.initial_data) == num_items:
+        data  = list(params.initial_data)
+        color = ["b"] * num_items
+    else:
+        data, color = make_data(num_items, data_max, params.data_condition)
 
     algo_name, algo_fn = AlgorithmList[params.algorithm_id]
-    generator = algo_fn(data, color)
+    sig = inspect.signature(algo_fn)
+    if "max_tasks" in sig.parameters:
+        mt = max(2, params.max_tasks) if params.max_tasks >= 2 else 4
+        generator = algo_fn(data, color, max_tasks=mt)
+    else:
+        generator = algo_fn(data, color)
 
     session_id = str(uuid.uuid4())
     sessions[session_id] = {
