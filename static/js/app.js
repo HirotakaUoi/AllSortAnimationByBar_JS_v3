@@ -53,7 +53,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   _setupZoomControls();
   document.getElementById("btn-add-panel")   .addEventListener("click", addPanel);
   document.getElementById("btn-start-all")   .addEventListener("click", startAll);
+  document.getElementById("btn-pause-all")   .addEventListener("click", pauseAll);
   document.getElementById("btn-stop-all")    .addEventListener("click", stopAll);
+  document.getElementById("btn-reset-all")   .addEventListener("click", resetAll);
   document.getElementById("btn-sync-size")   .addEventListener("click", syncSize);
   document.getElementById("btn-apply-global").addEventListener("click", applyGlobalToAll);
   addPanel(); // 初期パネルを1つ表示
@@ -206,20 +208,40 @@ function addPanel() {
   panel.mount(document.getElementById("panels-container"));
 }
 
-// ===== 全開始 / 全停止 =============================================
+// ===== 全開始 / 全一時停止 / 全停止 / 全リセット ====================
 function startAll() {
   document.querySelectorAll(".panel").forEach((el) => {
     const panel = el._panel;
     if (panel && !panel.isRunning) panel.start();
   });
 }
+function pauseAll() {
+  // 実行中パネルが1つでも再開中なら全一時停止、全て停止中なら全再開
+  const panels = [...document.querySelectorAll(".panel")]
+    .map(el => el._panel).filter(p => p && p.isRunning);
+  const anyRunning = panels.some(p => !p.isPaused);
+  panels.forEach(p => {
+    if (anyRunning && !p.isPaused) p.togglePause();   // 一時停止へ
+    else if (!anyRunning && p.isPaused) p.togglePause(); // 全再開
+  });
+  // ボタンラベルを更新
+  const btn = document.getElementById("btn-pause-all");
+  btn.textContent = anyRunning ? "▶ 全再開" : "⏸ 全一時停止";
+}
 function stopAll() {
   document.querySelectorAll(".panel").forEach((el) => {
     const p = el._panel;
     if (p && p.isRunning) p.stop();
   });
+  document.getElementById("btn-pause-all").textContent = "⏸ 全一時停止";
 }
-
+function resetAll() {
+  document.querySelectorAll(".panel").forEach((el) => {
+    const p = el._panel;
+    if (p) p.reset();
+  });
+  document.getElementById("btn-pause-all").textContent = "⏸ 全一時停止";
+}
 // ===================================================================
 // SortPanel クラス
 // ===================================================================
@@ -736,7 +758,12 @@ class SortPanel {
     this.sortCanvas  = null;
     this._lastFrame  = null;
     this._frameCount = 0;
-    this._drawPreview();
+    // キャッシュがあれば開始時のデータセットを復元、なければ新規生成
+    if (this._previewCache) {
+      this._drawPreviewFromData(this._previewCache);
+    } else {
+      this._drawPreview();
+    }
   }
 
   // ── パネル削除 ───────────────────────────────────────────────
