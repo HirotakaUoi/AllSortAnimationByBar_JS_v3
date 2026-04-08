@@ -69,7 +69,7 @@ def start_session(params: StartParams):
         return JSONResponse({"error": "invalid algorithm_id"}, status_code=400)
 
     num_items = params.num_items
-    data_max  = 300 if num_items > 150 else 100
+    data_max  = 999 if num_items >= 200 else 99
 
     if params.initial_data and len(params.initial_data) == num_items:
         data  = list(params.initial_data)
