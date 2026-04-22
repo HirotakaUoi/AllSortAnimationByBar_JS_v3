@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "AllSortAnimationByBar_JS_v3",
-      "runtimeExecutable": "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
+      "runtimeExecutable": "/opt/anaconda3/bin/python3",
       "runtimeArgs": [
         "-m",
         "uvicorn",
