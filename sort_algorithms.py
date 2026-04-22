@@ -659,6 +659,168 @@ def gnome_sort(data, color):
     yield make_frame(data, color, finished=True)
 
 
+def merge_sort_iter(data, color):
+    """ボトムアップ・マージソート（繰り返し版）
+    width=1 から始め、隣り合うサブ列を順にマージして倍々に拡大する。
+    バッファ・木構造表示なし: マージ書き戻し時のバーの動きのみを可視化。
+    色の意味:
+      c = マージ前の左サブ列
+      m = マージ前の右サブ列
+      r = 比較中の書き込み先
+      c = 書き込み完了（一瞬だけ点灯）
+    """
+    n = len(data)
+    width = 1
+
+    while width < n:
+        for left in range(0, n, 2 * width):
+            mid   = min(left + width - 1,     n - 1)
+            right = min(left + 2 * width - 1, n - 1)
+            if mid >= right:
+                continue                             # マージ不要
+
+            # マージ対象範囲を色分けしてハイライト
+            for k in range(left, mid + 1):       color[k] = "c"
+            for k in range(mid + 1, right + 1):  color[k] = "m"
+            yield make_frame(
+                data, color,
+                texts=[f"width={width}  [{left}..{mid}] + [{mid+1}..{right}]"],
+                bars=list(range(left, right + 1)),
+            )
+            for k in range(left, right + 1):     color[k] = "b"
+
+            # 一時バッファへコピー → マージして書き戻し
+            tmp      = data[left:right + 1]
+            left_len = mid - left + 1
+            i, j, k  = 0, left_len, left
+
+            while i < left_len and j < len(tmp):
+                color[k] = "r"
+                yield make_frame(
+                    data, color,
+                    texts=[f"width={width}  {tmp[i]} vs {tmp[j]}"],
+                    bars=[k],
+                )
+                if tmp[i] <= tmp[j]:
+                    data[k] = tmp[i];  i += 1
+                else:
+                    data[k] = tmp[j];  j += 1
+                color[k] = "c"
+                yield make_frame(
+                    data, color,
+                    texts=[f"width={width}  [{k}] ← {data[k]}"],
+                    bars=[k],
+                )
+                color[k] = "b"
+                k += 1
+
+            while i < left_len:
+                data[k] = tmp[i]
+                color[k] = "c"
+                yield make_frame(
+                    data, color,
+                    texts=[f"width={width}  残り左 [{k}] ← {data[k]}"],
+                    bars=[k],
+                )
+                color[k] = "b"
+                i += 1;  k += 1
+
+            while j < len(tmp):
+                data[k] = tmp[j]
+                color[k] = "c"
+                yield make_frame(
+                    data, color,
+                    texts=[f"width={width}  残り右 [{k}] ← {data[k]}"],
+                    bars=[k],
+                )
+                color[k] = "b"
+                j += 1;  k += 1
+
+        width *= 2
+
+    yield make_frame(data, color, finished=True)
+
+
+def heap_sort(data, color):
+    """ヒープソート（最大ヒープ）
+    Phase 1: ボトムアップでヒープを構築 (sift_down × n/2 回)
+    Phase 2: 根と末尾を交換して末尾を確定、根を sift_down で再構築
+    バッファ・木構造表示なし: バーの移動だけを可視化。
+    色の意味:
+      r = sift_down 対象ノード
+      y = 比較する子ノード
+      g = ソート確定済み（末尾から積み上がる）
+    """
+    n = len(data)
+
+    def sift_down(root, end, phase):
+        """最大ヒープの sift_down をステップ単位で yield するサブジェネレータ"""
+        while True:
+            largest = root
+            lc = 2 * root + 1
+            rc = 2 * root + 2
+
+            cands = [root]
+            color[root] = "r"
+            if lc <= end: color[lc] = "y"; cands.append(lc)
+            if rc <= end: color[rc] = "y"; cands.append(rc)
+            yield make_frame(data, color,
+                             texts=[f"{phase}  node={root}"],
+                             bars=cands)
+
+            if lc <= end and data[lc] > data[largest]: largest = lc
+            if rc <= end and data[rc] > data[largest]: largest = rc
+
+            if lc <= end: color[lc] = "b"
+            if rc <= end: color[rc] = "b"
+
+            if largest == root:
+                # これ以上沈まない → 確定
+                color[root] = "b"
+                yield make_frame(data, color,
+                                 texts=[f"{phase}  [{root}] 安定"],
+                                 bars=[root])
+                break
+
+            # 子と交換して下へ潜る
+            color[largest] = "y"
+            yield make_frame(data, color,
+                             arrows=[[root, largest]],
+                             texts=[f"{phase}  {root} ⇄ {largest}"],
+                             bars=[root, largest])
+            data[root], data[largest] = data[largest], data[root]
+            color[root], color[largest] = color[largest], color[root]
+            yield make_frame(data, color,
+                             texts=[f"{phase}  {root} ⇄ {largest}"],
+                             bars=[root, largest])
+            color[root] = "b"
+            root = largest
+
+    # ─── Phase 1: ヒープ構築 ───────────────────────────────────────────
+    for i in range(n // 2 - 1, -1, -1):
+        yield from sift_down(i, n - 1, f"ヒープ構築[{i}]")
+
+    # ─── Phase 2: 最大値を末尾へ繰り返し送り出す ──────────────────────
+    for end in range(n - 1, 0, -1):
+        color[0] = "r"; color[end] = "y"
+        yield make_frame(data, color,
+                         arrows=[[0, end]],
+                         texts=[f"最大 {data[0]} → [{end}]"],
+                         bars=[0, end])
+        data[0], data[end] = data[end], data[0]
+        color[0], color[end] = color[end], color[0]
+        color[end] = "g"
+        yield make_frame(data, color,
+                         texts=[f"[{end}] 確定"],
+                         bars=[0, end])
+        color[0] = "b"
+        if end > 1:
+            yield from sift_down(0, end - 1, f"再構築")
+
+    color[0] = "g"
+    yield make_frame(data, color, finished=True)
+
+
 def pancake_sort(data, color):
     n = len(data)
     for i in range(n, 1, -1):
@@ -737,6 +899,8 @@ AlgorithmList = [
     ("選択ソート",                          selection_sort),
     ("挿入ソート",                          insertion_sort),
     ("シェルソート",                        shell_sort),
+    ("マージソート (繰り返し)",             merge_sort_iter),
+    ("ヒープソート",                        heap_sort),
     ("クイックソート",                      quick_sort),
     ("クイックソート (3点中央値)",          quick_sort_select3),
     ("クイックソート (ランダム選択)",       quick_sort_random),

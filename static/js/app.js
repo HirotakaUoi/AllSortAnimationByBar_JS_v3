@@ -51,6 +51,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   await loadMeta();
   _setupGlobalControls();
   _setupZoomControls();
+  _setupThemeControls();
   document.getElementById("btn-add-panel")   .addEventListener("click", addPanel);
   document.getElementById("btn-start-all")   .addEventListener("click", startAll);
   document.getElementById("btn-pause-all")   .addEventListener("click", pauseAll);
@@ -88,6 +89,40 @@ function _setupGlobalControls() {
     const v    = Number(gSpeed.value);
     const mult = Math.round(v / 80 * 10) / 10;
     gSpeedVal.textContent = `×${mult.toFixed(1)}`;
+  });
+}
+
+// ===== テーマ ======================================================
+
+function _setupThemeControls() {
+  document.querySelectorAll(".theme-btn").forEach(btn => {
+    btn.addEventListener("click", () => _applyTheme(btn.dataset.th));
+  });
+}
+
+function _applyTheme(key) {
+  // body の data-theme を更新（CSS オーバーライドが反応する）
+  document.body.dataset.theme = key;
+
+  // canvas.js のテーマも切替
+  setCanvasTheme(key);
+
+  // アクティブボタンを更新
+  document.querySelectorAll(".theme-btn").forEach(b => {
+    b.classList.toggle("theme-active", b.dataset.th === key);
+  });
+
+  // 全パネルのキャンバスを再描画
+  document.querySelectorAll(".panel").forEach(el => {
+    const panel = el._panel;
+    if (!panel) return;
+    if (panel.isRunning && panel.sortCanvas && panel._lastFrame) {
+      panel.sortCanvas.draw(panel._lastFrame);
+    } else if (panel._previewCache) {
+      panel._drawPreviewFromData(panel._previewCache);
+    } else {
+      panel._drawPreview();
+    }
   });
 }
 

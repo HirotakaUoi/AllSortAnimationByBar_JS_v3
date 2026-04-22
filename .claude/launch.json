@@ -2,10 +2,16 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "sort-animation",
-      "runtimeExecutable": "uvicorn",
-      "runtimeArgs": ["main:app", "--port", "8000"],
-      "port": 8000
+      "name": "AllSortAnimationByBar_JS_v3",
+      "runtimeExecutable": "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "main:app",
+        "--port",
+        "8003"
+      ],
+      "port": 8003
     }
   ]
 }
