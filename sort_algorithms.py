@@ -918,20 +918,28 @@ def intro_sort(data, color):
 
         else:
             # ── クイックソート (3点中央値ピボット) ──────────────────────
-            if last - first >= 2:
+            if first + 2 < last:
                 mid  = (first + last) // 2
                 trio = sorted([(data[first], first),
                                (data[mid],   mid),
                                (data[last],  last)], key=lambda x: x[0])
                 piv_idx = trio[1][1]
-                if piv_idx != last:
-                    color[first] = color[mid] = color[last] = "m"
-                    yield make_frame(data, color,
-                                     texts=[f"QS d={depth}/{max_depth}"
-                                            f"  中央値={data[piv_idx]}  [{first}..{last}]"],
-                                     bars=[first, mid, last])
-                    data[piv_idx], data[last] = data[last], data[piv_idx]
-                    color[first] = color[mid] = color[last] = "b"
+                texts_sel = [f"QS d={depth}/{max_depth}"
+                             f"  中央値={data[piv_idx]}  [{first}..{last}]"]
+                color[first] = color[mid] = color[last] = "m"
+                yield make_frame(data, color,
+                                 texts=texts_sel,
+                                 lines=[[data[last], first, last]],
+                                 bars=[first, mid, last])
+                arrows_sel = [[piv_idx, last]] if piv_idx != last else []
+                color[piv_idx] = "c"
+                yield make_frame(data, color, arrows=arrows_sel,
+                                 texts=texts_sel,
+                                 lines=[[data[piv_idx], first, last]],
+                                 bars=[first, mid, last])
+                data[piv_idx], data[last] = data[last], data[piv_idx]
+                color[first] = color[mid] = color[last] = "b"
+                color[last] = "c"
 
             pivot = data[last]
             color[last] = "r"
