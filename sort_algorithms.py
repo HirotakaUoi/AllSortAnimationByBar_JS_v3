@@ -277,9 +277,9 @@ def quick_sort(data, color, option=None):
                              texts=texts, lines=lines, bars=[i, last])
             stack.append((i + 1, last))
             stack.append((first, i - 1))
-        elif last > 0:
-            color[last] = "gray"
-            yield make_frame(data, color, bars=[last])
+        elif first == last:
+            color[first] = "gray"
+            yield make_frame(data, color, bars=[first])
     yield make_frame(data, color, finished=True)
 
 
@@ -821,6 +821,164 @@ def heap_sort(data, color):
     yield make_frame(data, color, finished=True)
 
 
+def intro_sort(data, color):
+    """イントロソート: クイックソート + ヒープソートのハイブリッド
+    再帰深さが 2*floor(log2(N)) を超えたサブ配列をヒープソートに切り替える。
+
+    色の意味:
+      r  = ピボット / sift_down 対象ノード
+      y  = 右走査ポインタ / 比較する子ノード
+      m  = 左走査ポインタ / ヒープソート切替対象の範囲
+      g  = ソート確定済み
+    """
+    n = len(data)
+    if n <= 1:
+        yield make_frame(data, color, finished=True)
+        return
+
+    max_depth = 2 * int(math.log2(n))
+
+    def sift_down_range(base, root, end, phase):
+        while True:
+            largest = root
+            pos = root - base
+            lc  = base + 2 * pos + 1
+            rc  = base + 2 * pos + 2
+
+            cands = [root]
+            color[root] = "r"
+            if lc <= end: color[lc] = "y"; cands.append(lc)
+            if rc <= end: color[rc] = "y"; cands.append(rc)
+            yield make_frame(data, color, texts=[phase], bars=cands)
+
+            if lc <= end and data[lc] > data[largest]: largest = lc
+            if rc <= end and data[rc] > data[largest]: largest = rc
+
+            if lc <= end: color[lc] = "b"
+            if rc <= end: color[rc] = "b"
+
+            if largest == root:
+                color[root] = "b"
+                yield make_frame(data, color, texts=[phase], bars=[root])
+                break
+
+            color[largest] = "y"
+            yield make_frame(data, color, arrows=[[root, largest]],
+                             texts=[phase], bars=[root, largest])
+            data[root], data[largest] = data[largest], data[root]
+            color[root], color[largest] = color[largest], color[root]
+            yield make_frame(data, color, texts=[phase], bars=[root, largest])
+            color[root] = "b"
+            root = largest
+
+    def heap_sort_range(first, last):
+        size = last - first + 1
+        for i in range(first + size // 2 - 1, first - 1, -1):
+            yield from sift_down_range(first, i, last,
+                                       f"HS構築 [{first}..{last}]  node={i}")
+        for end in range(last, first, -1):
+            color[first] = "r"; color[end] = "y"
+            yield make_frame(data, color, arrows=[[first, end]],
+                             texts=[f"HS [{first}..{last}]  最大 {data[first]} → [{end}]"],
+                             bars=[first, end])
+            data[first], data[end] = data[end], data[first]
+            color[first], color[end] = color[end], color[first]
+            color[end] = "g"
+            yield make_frame(data, color,
+                             texts=[f"HS [{first}..{last}]  [{end}] 確定"],
+                             bars=[first, end])
+            color[first] = "b"
+            if end > first + 1:
+                yield from sift_down_range(first, first, end - 1,
+                                           f"HS再構築 [{first}..{end-1}]")
+        color[first] = "g"
+        yield make_frame(data, color, bars=[first])
+
+    # Stack: (first, last, depth)
+    stack = [(0, n - 1, 0)]
+
+    while stack:
+        first, last, depth = stack.pop()
+
+        if first >= last:
+            if first == last:
+                color[first] = "g"
+                yield make_frame(data, color, bars=[first])
+            continue
+
+        if depth >= max_depth:
+            # ── ヒープソートに切り替え ──────────────────────────────────
+            for k in range(first, last + 1): color[k] = "m"
+            yield make_frame(data, color,
+                             texts=[f"深さ {depth} ≥ {max_depth}"
+                                    f"  → ヒープソートに切替  [{first}..{last}]"],
+                             bars=list(range(first, last + 1)))
+            for k in range(first, last + 1): color[k] = "b"
+            yield from heap_sort_range(first, last)
+
+        else:
+            # ── クイックソート (3点中央値ピボット) ──────────────────────
+            if last - first >= 2:
+                mid  = (first + last) // 2
+                trio = sorted([(data[first], first),
+                               (data[mid],   mid),
+                               (data[last],  last)], key=lambda x: x[0])
+                piv_idx = trio[1][1]
+                if piv_idx != last:
+                    color[first] = color[mid] = color[last] = "m"
+                    yield make_frame(data, color,
+                                     texts=[f"QS d={depth}/{max_depth}"
+                                            f"  中央値={data[piv_idx]}  [{first}..{last}]"],
+                                     bars=[first, mid, last])
+                    data[piv_idx], data[last] = data[last], data[piv_idx]
+                    color[first] = color[mid] = color[last] = "b"
+
+            pivot = data[last]
+            color[last] = "r"
+            lines = [[pivot, first, last]]
+            texts = [f"QS d={depth}/{max_depth}  pivot={pivot}  [{first}..{last}]"]
+            yield make_frame(data, color, texts=texts, lines=lines, bars=[last])
+
+            i = first; j = last - 1
+            if i < last:  color[i] = "y"
+            if j > first: color[j] = "m"
+
+            while True:
+                if i < last:   color[i] = "y"
+                if j > first:  color[j] = "m"
+                while i < last and data[i] < pivot:
+                    color[i] = "b"; i += 1
+                    if i < last: color[i] = "y"
+                    yield make_frame(data, color, texts=texts, lines=lines, bars=[i])
+                while j >= first and data[j] > pivot:
+                    color[j] = "b"; j -= 1
+                    if j > first: color[j] = "m"
+                    yield make_frame(data, color, texts=texts, lines=lines, bars=[j])
+                if i >= j:
+                    break
+                data[i], data[j] = data[j], data[i]
+                color[i], color[j] = color[j], color[i]
+                yield make_frame(data, color, arrows=[[i, j]],
+                                 texts=texts, lines=lines, bars=[i, j])
+                color[i] = color[j] = "b"
+                yield make_frame(data, color, texts=texts, lines=lines, bars=[i, j])
+                i += 1; j -= 1
+                yield make_frame(data, color, texts=texts, lines=lines, bars=[i, j])
+
+            yield make_frame(data, color, arrows=[[i, last]],
+                             texts=texts, lines=lines, bars=[i, last])
+            data[i], data[last] = data[last], data[i]
+            color[i], color[last] = color[last], color[i]
+            color[i] = "g"; color[last] = "b"
+            yield make_frame(data, color, arrows=[[i, last]],
+                             texts=texts, lines=lines, bars=[i, last])
+
+            stack.append((i + 1, last,   depth + 1))
+            stack.append((first,  i - 1, depth + 1))
+
+    yield make_frame(data, color, finished=True)
+
+
 def pancake_sort(data, color):
     n = len(data)
     for i in range(n, 1, -1):
@@ -905,6 +1063,7 @@ AlgorithmList = [
     ("クイックソート (3点中央値)",          quick_sort_select3),
     ("クイックソート (ランダム選択)",       quick_sort_random),
     ("クイックソート (3-way partition)",    quick_sort_3way),
+    ("イントロソート",                       intro_sort),
     ("並列クイックソート (CPU数無制限)",     quick_sort_parallel),
     ("並列クイックソート (CPU数制限)",      quick_sort_parallel_limited),
     ("バイトニックソート",                  bitonic_sort),

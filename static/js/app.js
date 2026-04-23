@@ -573,7 +573,7 @@ class SortPanel {
   _generatePreviewData() {
     const numItems  = Number(this.el.querySelector(".sel-size").value);
     const condition = Number(this.el.querySelector(".sel-cond").value);
-    const dataMax   = numItems > 150 ? 300 : 100;
+    const dataMax   = numItems >= 200 ? 999 : 99;
 
     let data = Array.from({ length: numItems },
                           () => Math.floor(Math.random() * dataMax) + 1);
