@@ -15,6 +15,58 @@ let conditions  = [];    // [{ id, name }, ...]
 let panelSeq    = 0;     // パネル ID 採番
 let zoomLevel   = 1.0;   // パネルコンテナのズーム倍率
 
+// ===== SyncTimer — 全パネル共通の再生タイマー ====================
+// 単一の setInterval で全パネルへ同時にフレームを表示・要求することで
+// パネル間のフレームズレをなくす。
+//
+// 動作:
+//   tick ① → 全パネルに _requestNextFrame() を呼んでフレームを先行取得
+//   各パネル: サーバーからフレームを受け取ったら _pendingFrame に蓄積
+//   tick ② → 全パネルの _pendingFrame を同時に表示してから次を要求
+//          → これにより表示タイミングが tick に揃いズレが消える
+const SyncTimer = {
+  _timerId:    null,
+  _intervalMs: 80,
+  _panels:     new Set(),
+
+  register(panel) {
+    this._panels.add(panel);
+    if (!this._timerId) this._start();
+  },
+
+  unregister(panel) {
+    this._panels.delete(panel);
+    if (this._panels.size === 0) this._stop();
+  },
+
+  setIntervalMs(ms) {
+    if (this._intervalMs === ms) return;
+    this._intervalMs = ms;
+    if (this._timerId) { this._stop(); this._start(); }
+  },
+
+  _start() {
+    this._timerId = setInterval(() => this._tick(), this._intervalMs);
+  },
+
+  _stop() {
+    clearInterval(this._timerId);
+    this._timerId = null;
+  },
+
+  _tick() {
+    // Phase 1: バッファ済みフレームを全パネル同時に表示
+    this._panels.forEach(p => {
+      if (p._pendingFrame) {
+        p._displayFrame(p._pendingFrame);
+        p._pendingFrame = null;
+      }
+    });
+    // Phase 2: 表示が終わった後、全パネルへ次フレームを要求
+    this._panels.forEach(p => p._requestNextFrame());
+  },
+};
+
 // ===== スナップ設定 ================================================
 const SNAP_THRESHOLD = 15;  // px — この距離以内なら吸着する
 const SNAP_GAP       = 10;  // px — 隣接エッジスナップ時の余白
@@ -284,15 +336,17 @@ function resetAll() {
 // ===================================================================
 class SortPanel {
   constructor(id) {
-    this.id        = id;
-    this.sessionId = null;
-    this.client    = null;
-    this.sortCanvas= null;
-    this.el        = null;
-    this.isRunning = false;
-    this.isPaused  = false;
-    this.numItems  = 0;
-    this.dataMax   = 0;
+    this.id               = id;
+    this.sessionId        = null;
+    this.client           = null;
+    this.sortCanvas       = null;
+    this.el               = null;
+    this.isRunning        = false;
+    this.isPaused         = false;
+    this.numItems         = 0;
+    this.dataMax          = 0;
+    this._waitingForFrame = false;
+    this._pendingFrame    = null;   // バッファ済みフレーム（tick で一括表示）
   }
 
   // ── DOM 構築 ────────────────────────────────────────────────────
@@ -654,16 +708,16 @@ class SortPanel {
 
   // ── スピード変換 ─────────────────────────────────────────────
   _applySpeed(sliderVal) {
-    const speed = Math.round(200 / sliderVal * 10) / 1000;
-    const mult  = Math.round(sliderVal / 80 * 10) / 10;
+    const ms   = Math.round(200 / sliderVal * 10);   // ms/フレーム
+    const mult = Math.round(sliderVal / 80 * 10) / 10;
     this.el.querySelector(".speed-value").textContent = `×${mult.toFixed(1)}`;
-    if (this.client) this.client.setSpeed(speed);
-    this._speed = speed;
+    this._speed = ms / 1000;
+    SyncTimer.setIntervalMs(ms);
   }
 
-  _currentSpeed() {
+  _currentSpeedMs() {
     const v = Number(this.el.querySelector(".rng-speed").value);
-    return Math.round(200 / v * 10) / 1000;
+    return Math.round(200 / v * 10);
   }
 
   // ── 開始 ────────────────────────────────────────────────────────
@@ -673,8 +727,6 @@ class SortPanel {
     const algoId   = Number(this.el.querySelector(".sel-algo").value);
     const numItems = Number(this.el.querySelector(".sel-size").value);
     const condId   = Number(this.el.querySelector(".sel-cond").value);
-    const speed    = this._currentSpeed();
-
     const maxTasks = 2 ** Number(this.el.querySelector(".rng-max-tasks").value);
 
     let info;
@@ -683,7 +735,6 @@ class SortPanel {
         algorithm_id:   algoId,
         num_items:      numItems,
         data_condition: condId,
-        speed:          speed,
         max_tasks:      maxTasks,
       };
       // 全パネル一括適用で共有データが設定済みの場合はそれを送る
@@ -702,12 +753,13 @@ class SortPanel {
       return;
     }
 
-    this.sessionId = info.session_id;
-    this.numItems  = info.num_items;
-    this.dataMax   = info.data_max;
-    this.isRunning = true;
-    this.isPaused  = false;
-    this._frameCount = 0;
+    this.sessionId        = info.session_id;
+    this.numItems         = info.num_items;
+    this.dataMax          = info.data_max;
+    this.isRunning        = true;
+    this.isPaused         = false;
+    this._waitingForFrame = false;
+    this._frameCount      = 0;
 
     const canvas = this.el.querySelector(".sort-canvas");
     this.sortCanvas = new SortCanvas(canvas, this.numItems, this.dataMax);
@@ -720,6 +772,10 @@ class SortPanel {
     this.el.querySelector(".status-algo").textContent = info.algo_name;
     this.el.querySelector(".text-overlay").textContent = "アニメーション開始...";
 
+    // SyncTimer に登録して全パネル共通タイマーで進行
+    SyncTimer.setIntervalMs(this._currentSpeedMs());
+    SyncTimer.register(this);
+
     this.client = new AnimationClient(
       this.sessionId,
       (frame) => this._onFrame(frame),
@@ -727,10 +783,13 @@ class SortPanel {
       (ev)    => this._setStatus("接続エラー", "red"),
     );
     this.client.connect();
+
+    // 接続直後に最初のフレームを要求（タイマー初回発火を待たない）
+    this.client.ws.addEventListener("open", () => this._requestNextFrame(), { once: true });
   }
 
-  // ── フレーム受信 ─────────────────────────────────────────────
-  _onFrame(frame) {
+  // ── フレーム表示（tick から呼ばれる一括表示用）────────────────
+  _displayFrame(frame) {
     this._lastFrame  = frame;
     this._frameCount = (this._frameCount ?? 0) + 1;
 
@@ -741,6 +800,7 @@ class SortPanel {
       `フレーム: ${this._frameCount}`;
 
     if (frame.finished) {
+      SyncTimer.unregister(this);
       this.isRunning = false;
       this.el.classList.remove("running");
       this.el.classList.add("finished");
@@ -749,8 +809,26 @@ class SortPanel {
     }
   }
 
+  // ── フレーム受信 ─────────────────────────────────────────────
+  // 受信したフレームは _pendingFrame に蓄積し、
+  // SyncTimer の tick で全パネル同時に表示することでズレをなくす。
+  // 最初のフレームだけは即時表示して画面の空白を防ぐ。
+  _onFrame(frame) {
+    this._waitingForFrame = false;
+    if (this._frameCount === 0) {
+      // 第1フレームは即時表示（WS 接続直後の空白を防ぐ）
+      this._displayFrame(frame);
+    } else {
+      // 以降は tick まで蓄積
+      this._pendingFrame = frame;
+    }
+  }
+
   // ── WebSocket クローズ ────────────────────────────────────────
   _onClose() {
+    SyncTimer.unregister(this);
+    this._waitingForFrame = false;
+    this._pendingFrame    = null;
     if (this.isRunning) {
       this.isRunning = false;
       this.el.classList.remove("running");
@@ -759,17 +837,25 @@ class SortPanel {
     }
   }
 
+  // ── 次フレーム要求（SyncTimer tick から呼ばれる） ─────────────
+  // _pendingFrame が残っている間は追加要求しない。
+  _requestNextFrame() {
+    if (!this.isRunning || this.isPaused || this._waitingForFrame || this._pendingFrame) return;
+    this._waitingForFrame = true;
+    this.client?.requestNext();
+  }
+
   // ── 一時停止 / 再開 ────────────────────────────────────────────
   togglePause() {
     if (!this.isRunning) return;
     this.isPaused = !this.isPaused;
     const btn = this.el.querySelector(".btn-pause");
     if (this.isPaused) {
-      this.client.pause();
       btn.textContent = "▶ 再開";
       this._setStatus("一時停止", "#FFD700");
     } else {
-      this.client.resume();
+      // 再開時は即座に次フレームを要求（タイマー次回発火を待たない）
+      this._requestNextFrame();
       btn.textContent = "⏸ 一時停止";
       this._setStatus("実行中", "#90caf9");
     }
@@ -778,6 +864,9 @@ class SortPanel {
   // ── 停止 ─────────────────────────────────────────────────────
   stop() {
     if (!this.isRunning) return;
+    SyncTimer.unregister(this);
+    this._waitingForFrame = false;
+    this._pendingFrame    = null;
     this.client?.stop();
     this.client?.disconnect();
     this.client    = null;
@@ -790,6 +879,8 @@ class SortPanel {
   // ── リセット ─────────────────────────────────────────────────
   reset() {
     if (this.isRunning) this.stop();
+    this._waitingForFrame = false;
+    this._pendingFrame    = null;
     this.el.querySelector(".text-overlay").textContent = "（開始ボタンを押してください）";
     this.el.querySelector(".status-frames").textContent = "フレーム: 0";
     this.el.classList.remove("finished");
