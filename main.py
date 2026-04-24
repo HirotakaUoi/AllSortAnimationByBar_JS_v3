@@ -106,10 +106,10 @@ def start_session(params: StartParams):
 # ---------------------------------------------------------------------------
 # WebSocket  /ws/{session_id}
 # クライアントからの制御メッセージ:
-#   {"action": "set_speed", "speed": 0.05}
-#   {"action": "pause"}
-#   {"action": "resume"}
+#   {"action": "next"}   ← 次フレームを送信するよう要求
 #   {"action": "stop"}
+# フレーム送信タイミングはクライアント側の SyncTimer が管理する。
+# サーバーは "next" を受け取るまで次フレームを送らずに待機する。
 # ---------------------------------------------------------------------------
 
 @app.websocket("/ws/{session_id}")
@@ -122,20 +122,17 @@ async def ws_endpoint(ws: WebSocket, session_id: str):
         return
 
     session = sessions[session_id]
+    next_event = asyncio.Event()
 
     async def send_frames():
-        """アルゴリズム generator を順にクライアントへ送信する"""
+        """クライアントの "next" 要求ごとに1フレームずつ送信する"""
         try:
             for frame in session["generator"]:
-                if session["stopped"]:
-                    break
-                # ポーズ中は待機
-                while session["paused"] and not session["stopped"]:
-                    await asyncio.sleep(0.05)
+                await next_event.wait()
+                next_event.clear()
                 if session["stopped"]:
                     break
                 await ws.send_json(frame)
-                await asyncio.sleep(session["speed"])
         except Exception:
             pass
 
@@ -145,19 +142,18 @@ async def ws_endpoint(ws: WebSocket, session_id: str):
             while True:
                 msg = await ws.receive_json()
                 action = msg.get("action", "")
-                if action == "set_speed":
-                    session["speed"] = float(msg.get("speed", 0.08))
-                elif action == "pause":
-                    session["paused"] = True
-                elif action == "resume":
-                    session["paused"] = False
+                if action == "next":
+                    next_event.set()
                 elif action == "stop":
                     session["stopped"] = True
+                    next_event.set()   # send_frames のブロックを解除
                     break
         except WebSocketDisconnect:
             session["stopped"] = True
+            next_event.set()
         except Exception:
             session["stopped"] = True
+            next_event.set()
 
     sender   = asyncio.create_task(send_frames())
     receiver = asyncio.create_task(recv_controls())
