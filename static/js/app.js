@@ -344,6 +344,7 @@ class SortPanel {
     this.numItems         = 0;
     this.dataMax          = 0;
     this._pendingFrames   = [];     // 受信済み・表示待ちのフレームキュー
+    this._serverFinished  = false;  // サーバーが finished:true を送信済み
   }
 
   // ── DOM 構築 ────────────────────────────────────────────────────
@@ -755,8 +756,9 @@ class SortPanel {
     this.dataMax        = info.data_max;
     this.isRunning      = true;
     this.isPaused       = false;
-    this._pendingFrames = [];
-    this._frameCount    = 0;
+    this._pendingFrames  = [];
+    this._serverFinished = false;
+    this._frameCount     = 0;
 
     const canvas = this.el.querySelector(".sort-canvas");
     this.sortCanvas = new SortCanvas(canvas, this.numItems, this.dataMax);
@@ -809,6 +811,7 @@ class SortPanel {
   // サーバーからプッシュされたフレームをキューに蓄積。
   // 第1フレームは空白を防ぐため即時表示する。
   _onFrame(frame) {
+    if (frame.finished) this._serverFinished = true;
     if (this._frameCount === 0) {
       this._displayFrame(frame);
     } else {
@@ -818,6 +821,12 @@ class SortPanel {
 
   // ── WebSocket クローズ ────────────────────────────────────────
   _onClose() {
+    if (this._serverFinished) {
+      // 正常終了: バッファに残りフレームがある。SyncTimer が finished フレームを
+      // 表示するまで続行させる（_displayFrame が自動で unregister する）。
+      return;
+    }
+    // 異常切断: バッファを破棄して停止
     SyncTimer.unregister(this);
     this._pendingFrames = [];
     if (this.isRunning) {
@@ -848,7 +857,8 @@ class SortPanel {
   stop() {
     if (!this.isRunning) return;
     SyncTimer.unregister(this);
-    this._pendingFrames = [];
+    this._pendingFrames  = [];
+    this._serverFinished = false;
     this.client?.stop();
     this.client?.disconnect();
     this.client    = null;
@@ -861,7 +871,8 @@ class SortPanel {
   // ── リセット ─────────────────────────────────────────────────
   reset() {
     if (this.isRunning) this.stop();
-    this._pendingFrames = [];
+    this._pendingFrames  = [];
+    this._serverFinished = false;
     this.el.querySelector(".text-overlay").textContent = "（開始ボタンを押してください）";
     this.el.querySelector(".status-frames").textContent = "フレーム: 0";
     this.el.classList.remove("finished");
