@@ -15,6 +15,10 @@ let conditions  = [];    // [{ id, name }, ...]
 let panelSeq    = 0;     // パネル ID 採番
 let zoomLevel   = 1.0;   // パネルコンテナのズーム倍率
 
+// フレームパイプライン: この数のリクエストを常に同時送信してネットワーク遅延を隠蔽する
+// RTT ÷ tick_ms (200ms ÷ 25ms = 8) を目安に設定
+const PREFETCH = 8;
+
 // ===== SyncTimer — 全パネル共通の再生タイマー ====================
 // 単一の setInterval で全パネルへ同時にフレームを表示・要求することで
 // パネル間のフレームズレをなくす。
@@ -55,15 +59,13 @@ const SyncTimer = {
   },
 
   _tick() {
-    // Phase 1: バッファ済みフレームを全パネル同時に表示
+    // Phase 1: バッファ済みフレームを全パネル同時に表示（キューから1枚取り出す）
     this._panels.forEach(p => {
-      if (p._pendingFrame) {
-        p._displayFrame(p._pendingFrame);
-        p._pendingFrame = null;
-      }
+      const frame = p._pendingFrames?.shift();
+      if (frame) p._displayFrame(frame);
     });
-    // Phase 2: 表示が終わった後、全パネルへ次フレームを要求
-    this._panels.forEach(p => p._requestNextFrame());
+    // Phase 2: パイプラインを補充（フレームが届かない場合の安全網）
+    this._panels.forEach(p => p._fillPipeline?.());
   },
 };
 
@@ -345,8 +347,9 @@ class SortPanel {
     this.isPaused         = false;
     this.numItems         = 0;
     this.dataMax          = 0;
-    this._waitingForFrame = false;
-    this._pendingFrame    = null;   // バッファ済みフレーム（tick で一括表示）
+    this._inFlightCount   = 0;      // 送信済みだが未受信のリクエスト数
+    this._pendingFrames   = [];     // 受信済み・表示待ちのフレームキュー
+    this._finished        = false;  // サーバーから finished:true を受信済み
   }
 
   // ── DOM 構築 ────────────────────────────────────────────────────
@@ -753,13 +756,15 @@ class SortPanel {
       return;
     }
 
-    this.sessionId        = info.session_id;
-    this.numItems         = info.num_items;
-    this.dataMax          = info.data_max;
-    this.isRunning        = true;
-    this.isPaused         = false;
-    this._waitingForFrame = false;
-    this._frameCount      = 0;
+    this.sessionId      = info.session_id;
+    this.numItems       = info.num_items;
+    this.dataMax        = info.data_max;
+    this.isRunning      = true;
+    this.isPaused       = false;
+    this._inFlightCount = 0;
+    this._pendingFrames = [];
+    this._finished      = false;
+    this._frameCount    = 0;
 
     const canvas = this.el.querySelector(".sort-canvas");
     this.sortCanvas = new SortCanvas(canvas, this.numItems, this.dataMax);
@@ -784,8 +789,8 @@ class SortPanel {
     );
     this.client.connect();
 
-    // 接続直後に最初のフレームを要求（タイマー初回発火を待たない）
-    this.client.ws.addEventListener("open", () => this._requestNextFrame(), { once: true });
+    // 接続直後にパイプラインを開始（タイマー初回発火を待たない）
+    this.client.ws.addEventListener("open", () => this._fillPipeline(), { once: true });
   }
 
   // ── フレーム表示（tick から呼ばれる一括表示用）────────────────
@@ -810,41 +815,39 @@ class SortPanel {
   }
 
   // ── フレーム受信 ─────────────────────────────────────────────
-  // 受信したフレームは _pendingFrame に蓄積し、
-  // SyncTimer の tick で全パネル同時に表示することでズレをなくす。
-  // 最初のフレームだけは即時表示して画面の空白を防ぐ。
   _onFrame(frame) {
-    this._waitingForFrame = false;
+    this._inFlightCount = Math.max(0, this._inFlightCount - 1);
+    if (frame.finished) this._finished = true;
     if (this._frameCount === 0) {
       // 第1フレームは即時表示（WS 接続直後の空白を防ぐ）
       this._displayFrame(frame);
     } else {
-      // 以降は tick まで蓄積
-      this._pendingFrame = frame;
+      this._pendingFrames.push(frame);
+    }
+    // パイプラインを補充（finished でなければ）
+    if (!this._finished) this._fillPipeline();
+  }
+
+  // ── パイプライン補充 ─────────────────────────────────────────
+  // 在空リクエスト数 + キュー長が PREFETCH を下回る間、追加リクエストを送る。
+  _fillPipeline() {
+    if (!this.isRunning || this.isPaused || this._finished) return;
+    while (this._inFlightCount + this._pendingFrames.length < PREFETCH) {
+      if (!(this.client?.requestNext())) break;  // WS 未接続なら次 tick で再試行
+      this._inFlightCount++;
     }
   }
 
   // ── WebSocket クローズ ────────────────────────────────────────
   _onClose() {
     SyncTimer.unregister(this);
-    this._waitingForFrame = false;
-    this._pendingFrame    = null;
+    this._inFlightCount = 0;
+    this._pendingFrames = [];
     if (this.isRunning) {
       this.isRunning = false;
       this.el.classList.remove("running");
       this._setStatus("切断", "#888");
       this._setBtns({ start: true, pause: false, stop: false, reset: false });
-    }
-  }
-
-  // ── 次フレーム要求（SyncTimer tick から呼ばれる） ─────────────
-  // _pendingFrame が残っている間は追加要求しない。
-  _requestNextFrame() {
-    if (!this.isRunning || this.isPaused || this._waitingForFrame || this._pendingFrame) return;
-    this._waitingForFrame = true;
-    if (!(this.client?.requestNext())) {
-      // WebSocket 未接続（open イベント前に SyncTimer が先着した場合）→ 次 tick で再試行
-      this._waitingForFrame = false;
     }
   }
 
@@ -857,8 +860,8 @@ class SortPanel {
       btn.textContent = "▶ 再開";
       this._setStatus("一時停止", "#FFD700");
     } else {
-      // 再開時は即座に次フレームを要求（タイマー次回発火を待たない）
-      this._requestNextFrame();
+      // 再開時は即座にパイプラインを補充（タイマー次回発火を待たない）
+      this._fillPipeline();
       btn.textContent = "⏸ 一時停止";
       this._setStatus("実行中", "#90caf9");
     }
@@ -868,8 +871,9 @@ class SortPanel {
   stop() {
     if (!this.isRunning) return;
     SyncTimer.unregister(this);
-    this._waitingForFrame = false;
-    this._pendingFrame    = null;
+    this._inFlightCount = 0;
+    this._pendingFrames = [];
+    this._finished      = false;
     this.client?.stop();
     this.client?.disconnect();
     this.client    = null;
@@ -882,8 +886,9 @@ class SortPanel {
   // ── リセット ─────────────────────────────────────────────────
   reset() {
     if (this.isRunning) this.stop();
-    this._waitingForFrame = false;
-    this._pendingFrame    = null;
+    this._inFlightCount = 0;
+    this._pendingFrames = [];
+    this._finished      = false;
     this.el.querySelector(".text-overlay").textContent = "（開始ボタンを押してください）";
     this.el.querySelector(".status-frames").textContent = "フレーム: 0";
     this.el.classList.remove("finished");
