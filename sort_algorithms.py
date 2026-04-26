@@ -43,24 +43,32 @@ def make_frame(data, color, *, arrows=None, texts=None, lines=None,
 
 def make_data(num_items: int, data_max: int, condition: int):
     """指定条件の data / color リストを返す"""
+    # num_items <= data_max なら重複なし生成が可能（ステップ値条件を除く）
+    can_unique = num_items <= data_max
+
+    def _base():
+        """重複なし or 通常ランダムで基底配列を生成"""
+        if can_unique:
+            return random.sample(range(1, data_max + 1), num_items)
+        return [randint(1, data_max) for _ in range(num_items)]
+
     if condition == 1:          # 昇順
-        data = sorted([randint(1, data_max) for _ in range(num_items)])
+        data = sorted(_base())
     elif condition == 2:        # 降順
-        data = sorted([randint(1, data_max) for _ in range(num_items)],
-                      reverse=True)
+        data = sorted(_base(), reverse=True)
     elif condition == 3:        # ほぼ昇順
-        lst = sorted([randint(1, data_max) for _ in range(num_items)])
+        lst = sorted(_base())
         for _ in range(max(1, num_items // 10)):
             i, j = random.sample(range(num_items), 2)
             lst[i], lst[j] = lst[j], lst[i]
         data = lst
-    elif condition == 4:        # ステップ値
+    elif condition == 4:        # ステップ値（重複あり・意図的）
         steps = max(2, int(math.sqrt(num_items)))
         pool  = [randint(1, data_max // steps) + i * (data_max // steps)
                  for i in range(steps)]
         data  = random.choices(pool, k=num_items)
     else:                       # ランダム
-        data = [randint(1, data_max) for _ in range(num_items)]
+        data = _base()
 
     color = ["b"] * num_items
     return data, color

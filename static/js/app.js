@@ -96,6 +96,22 @@ function _snapValue(val, snapPoints, threshold) {
   return closest;
 }
 
+/**
+ * count <= max のとき重複なしランダム配列を返す（部分フィッシャー-イェーツ）。
+ * count > max のときは通常乱数（重複あり）。
+ */
+function _sampleUnique(count, max) {
+  if (count > max) {
+    return Array.from({ length: count }, () => Math.floor(Math.random() * max) + 1);
+  }
+  const pool = Array.from({ length: max }, (_, i) => i + 1);
+  for (let i = 0; i < count; i++) {
+    const j = i + Math.floor(Math.random() * (max - i));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, count);
+}
+
 // ===== 起動 ========================================================
 window.addEventListener("DOMContentLoaded", async () => {
   await loadMeta();
@@ -204,28 +220,32 @@ function _setupZoomControls() {
 function _generateSharedData(numItems, condition) {
   const dataMax = numItems >= 200 ? 999 : 99;
 
-  let data = Array.from({ length: numItems },
-                        () => Math.floor(Math.random() * dataMax) + 1);
-
-  if (condition === 1) {
-    data.sort((a, b) => a - b);
-  } else if (condition === 2) {
-    data.sort((a, b) => b - a);
-  } else if (condition === 3) {
-    data.sort((a, b) => a - b);
-    const swaps = Math.max(1, Math.floor(numItems / 10));
-    for (let k = 0; k < swaps; k++) {
-      const i = Math.floor(Math.random() * numItems);
-      const j = Math.floor(Math.random() * numItems);
-      [data[i], data[j]] = [data[j], data[i]];
-    }
-  } else if (condition === 4) {
+  let data;
+  if (condition === 4) {
+    // ステップ値: 重複あり（意図的）
     const steps = Math.max(2, Math.floor(Math.sqrt(numItems)));
     const pool  = Array.from({ length: steps }, (_, i) =>
       Math.floor(Math.random() * (dataMax / steps)) + i * Math.floor(dataMax / steps) + 1
     );
     data = Array.from({ length: numItems },
                       () => pool[Math.floor(Math.random() * pool.length)]);
+  } else {
+    // numItems <= dataMax なら重複なし
+    data = _sampleUnique(numItems, dataMax);
+    if (condition === 1) {
+      data.sort((a, b) => a - b);
+    } else if (condition === 2) {
+      data.sort((a, b) => b - a);
+    } else if (condition === 3) {
+      data.sort((a, b) => a - b);
+      const swaps = Math.max(1, Math.floor(numItems / 10));
+      for (let k = 0; k < swaps; k++) {
+        const i = Math.floor(Math.random() * numItems);
+        const j = Math.floor(Math.random() * numItems);
+        [data[i], data[j]] = [data[j], data[i]];
+      }
+    }
+    // condition === 0: ランダム順のまま
   }
 
   return { data, color: new Array(numItems).fill("b"), dataMax, numItems };
@@ -627,28 +647,32 @@ class SortPanel {
     const condition = Number(this.el.querySelector(".sel-cond").value);
     const dataMax   = numItems >= 200 ? 999 : 99;
 
-    let data = Array.from({ length: numItems },
-                          () => Math.floor(Math.random() * dataMax) + 1);
-
-    if (condition === 1) {
-      data.sort((a, b) => a - b);
-    } else if (condition === 2) {
-      data.sort((a, b) => b - a);
-    } else if (condition === 3) {
-      data.sort((a, b) => a - b);
-      const swaps = Math.max(1, Math.floor(numItems / 10));
-      for (let k = 0; k < swaps; k++) {
-        const i = Math.floor(Math.random() * numItems);
-        const j = Math.floor(Math.random() * numItems);
-        [data[i], data[j]] = [data[j], data[i]];
-      }
-    } else if (condition === 4) {
+    let data;
+    if (condition === 4) {
+      // ステップ値: 重複あり（意図的）
       const steps = Math.max(2, Math.floor(Math.sqrt(numItems)));
       const pool  = Array.from({ length: steps }, (_, i) =>
         Math.floor(Math.random() * (dataMax / steps)) + i * Math.floor(dataMax / steps) + 1
       );
       data = Array.from({ length: numItems },
                         () => pool[Math.floor(Math.random() * pool.length)]);
+    } else {
+      // numItems <= dataMax なら重複なし
+      data = _sampleUnique(numItems, dataMax);
+      if (condition === 1) {
+        data.sort((a, b) => a - b);
+      } else if (condition === 2) {
+        data.sort((a, b) => b - a);
+      } else if (condition === 3) {
+        data.sort((a, b) => a - b);
+        const swaps = Math.max(1, Math.floor(numItems / 10));
+        for (let k = 0; k < swaps; k++) {
+          const i = Math.floor(Math.random() * numItems);
+          const j = Math.floor(Math.random() * numItems);
+          [data[i], data[j]] = [data[j], data[i]];
+        }
+      }
+      // condition === 0: ランダム順のまま
     }
 
     return { data, color: new Array(numItems).fill("b"), dataMax, numItems };
