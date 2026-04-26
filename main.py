@@ -122,17 +122,19 @@ async def ws_endpoint(ws: WebSocket, session_id: str):
         return
 
     session = sessions[session_id]
-    next_event = asyncio.Event()
 
     async def send_frames():
-        """クライアントの "next" 要求ごとに1フレームずつ送信する"""
+        """フレームを自動的にプッシュし続ける（v2 と同方式）"""
         try:
             for frame in session["generator"]:
-                await next_event.wait()
-                next_event.clear()
+                if session["stopped"]:
+                    break
+                while session["paused"] and not session["stopped"]:
+                    await asyncio.sleep(0.05)
                 if session["stopped"]:
                     break
                 await ws.send_json(frame)
+                await asyncio.sleep(0)   # イベントループに制御を返す
         except Exception:
             pass
 
@@ -142,18 +144,17 @@ async def ws_endpoint(ws: WebSocket, session_id: str):
             while True:
                 msg = await ws.receive_json()
                 action = msg.get("action", "")
-                if action == "next":
-                    next_event.set()
+                if action == "pause":
+                    session["paused"] = True
+                elif action == "resume":
+                    session["paused"] = False
                 elif action == "stop":
                     session["stopped"] = True
-                    next_event.set()   # send_frames のブロックを解除
                     break
         except WebSocketDisconnect:
             session["stopped"] = True
-            next_event.set()
         except Exception:
             session["stopped"] = True
-            next_event.set()
 
     sender   = asyncio.create_task(send_frames())
     receiver = asyncio.create_task(recv_controls())

@@ -1,8 +1,8 @@
 /**
  * ws_client.js  –  WebSocket クライアント（送受信ラッパー）
  *
- * フレーム送信タイミングはクライアント側 SyncTimer が管理する。
- * サーバーは requestNext() を受信するたびに次のフレームを1枚送る。
+ * サーバーがフレームを自動プッシュする（v2 と同方式）。
+ * クライアントは pause / resume / stop のみ送信する。
  */
 
 "use strict";
@@ -48,10 +48,9 @@ class AnimationClient {
     return false;
   }
 
-  /** 次フレームを1枚送るよう要求する（SyncTimer から呼ばれる）。送信成功なら true を返す */
-  requestNext() { return this._send({ action: "next" }); }
-
-  stop()        { this._send({ action: "stop" }); }
+  pause()  { this._send({ action: "pause" }); }
+  resume() { this._send({ action: "resume" }); }
+  stop()   { this._send({ action: "stop" }); }
 
   disconnect() {
     if (this.ws) {

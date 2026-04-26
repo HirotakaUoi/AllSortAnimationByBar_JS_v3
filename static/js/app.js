@@ -15,9 +15,6 @@ let conditions  = [];    // [{ id, name }, ...]
 let panelSeq    = 0;     // パネル ID 採番
 let zoomLevel   = 1.0;   // パネルコンテナのズーム倍率
 
-// フレームパイプライン: この数のリクエストを常に同時送信してネットワーク遅延を隠蔽する
-// RTT ÷ tick_ms (200ms ÷ 25ms = 8) を目安に設定
-const PREFETCH = 8;
 
 // ===== SyncTimer — 全パネル共通の再生タイマー ====================
 // 単一の setInterval で全パネルへ同時にフレームを表示・要求することで
@@ -59,13 +56,12 @@ const SyncTimer = {
   },
 
   _tick() {
-    // Phase 1: バッファ済みフレームを全パネル同時に表示（キューから1枚取り出す）
+    // 一時停止中でないパネルのみ、バッファから1フレーム取り出して表示
     this._panels.forEach(p => {
+      if (p.isPaused) return;
       const frame = p._pendingFrames?.shift();
       if (frame) p._displayFrame(frame);
     });
-    // Phase 2: パイプラインを補充（フレームが届かない場合の安全網）
-    this._panels.forEach(p => p._fillPipeline?.());
   },
 };
 
@@ -347,9 +343,7 @@ class SortPanel {
     this.isPaused         = false;
     this.numItems         = 0;
     this.dataMax          = 0;
-    this._inFlightCount   = 0;      // 送信済みだが未受信のリクエスト数
     this._pendingFrames   = [];     // 受信済み・表示待ちのフレームキュー
-    this._finished        = false;  // サーバーから finished:true を受信済み
   }
 
   // ── DOM 構築 ────────────────────────────────────────────────────
@@ -761,9 +755,7 @@ class SortPanel {
     this.dataMax        = info.data_max;
     this.isRunning      = true;
     this.isPaused       = false;
-    this._inFlightCount = 0;
     this._pendingFrames = [];
-    this._finished      = false;
     this._frameCount    = 0;
 
     const canvas = this.el.querySelector(".sort-canvas");
@@ -789,8 +781,7 @@ class SortPanel {
     );
     this.client.connect();
 
-    // 接続直後にパイプラインを開始（タイマー初回発火を待たない）
-    this.client.ws.addEventListener("open", () => this._fillPipeline(), { once: true });
+    // サーバーは接続直後にフレームをプッシュし始める（クライアント要求不要）
   }
 
   // ── フレーム表示（tick から呼ばれる一括表示用）────────────────
@@ -815,33 +806,19 @@ class SortPanel {
   }
 
   // ── フレーム受信 ─────────────────────────────────────────────
+  // サーバーからプッシュされたフレームをキューに蓄積。
+  // 第1フレームは空白を防ぐため即時表示する。
   _onFrame(frame) {
-    this._inFlightCount = Math.max(0, this._inFlightCount - 1);
-    if (frame.finished) this._finished = true;
     if (this._frameCount === 0) {
-      // 第1フレームは即時表示（WS 接続直後の空白を防ぐ）
       this._displayFrame(frame);
     } else {
       this._pendingFrames.push(frame);
-    }
-    // パイプラインを補充（finished でなければ）
-    if (!this._finished) this._fillPipeline();
-  }
-
-  // ── パイプライン補充 ─────────────────────────────────────────
-  // 在空リクエスト数 + キュー長が PREFETCH を下回る間、追加リクエストを送る。
-  _fillPipeline() {
-    if (!this.isRunning || this.isPaused || this._finished) return;
-    while (this._inFlightCount + this._pendingFrames.length < PREFETCH) {
-      if (!(this.client?.requestNext())) break;  // WS 未接続なら次 tick で再試行
-      this._inFlightCount++;
     }
   }
 
   // ── WebSocket クローズ ────────────────────────────────────────
   _onClose() {
     SyncTimer.unregister(this);
-    this._inFlightCount = 0;
     this._pendingFrames = [];
     if (this.isRunning) {
       this.isRunning = false;
@@ -857,11 +834,11 @@ class SortPanel {
     this.isPaused = !this.isPaused;
     const btn = this.el.querySelector(".btn-pause");
     if (this.isPaused) {
+      this.client?.pause();
       btn.textContent = "▶ 再開";
       this._setStatus("一時停止", "#FFD700");
     } else {
-      // 再開時は即座にパイプラインを補充（タイマー次回発火を待たない）
-      this._fillPipeline();
+      this.client?.resume();
       btn.textContent = "⏸ 一時停止";
       this._setStatus("実行中", "#90caf9");
     }
@@ -871,9 +848,7 @@ class SortPanel {
   stop() {
     if (!this.isRunning) return;
     SyncTimer.unregister(this);
-    this._inFlightCount = 0;
     this._pendingFrames = [];
-    this._finished      = false;
     this.client?.stop();
     this.client?.disconnect();
     this.client    = null;
@@ -886,9 +861,7 @@ class SortPanel {
   // ── リセット ─────────────────────────────────────────────────
   reset() {
     if (this.isRunning) this.stop();
-    this._inFlightCount = 0;
     this._pendingFrames = [];
-    this._finished      = false;
     this.el.querySelector(".text-overlay").textContent = "（開始ボタンを押してください）";
     this.el.querySelector(".status-frames").textContent = "フレーム: 0";
     this.el.classList.remove("finished");
