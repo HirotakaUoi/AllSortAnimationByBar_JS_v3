@@ -48,8 +48,8 @@ class AnimationClient {
     return false;
   }
 
-  /** 次フレームを1枚送るよう要求する（SyncTimer から呼ばれる） */
-  requestNext() { this._send({ action: "next" }); }
+  /** 次フレームを1枚送るよう要求する（SyncTimer から呼ばれる）。送信成功なら true を返す */
+  requestNext() { return this._send({ action: "next" }); }
 
   stop()        { this._send({ action: "stop" }); }
 

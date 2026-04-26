@@ -842,7 +842,10 @@ class SortPanel {
   _requestNextFrame() {
     if (!this.isRunning || this.isPaused || this._waitingForFrame || this._pendingFrame) return;
     this._waitingForFrame = true;
-    this.client?.requestNext();
+    if (!(this.client?.requestNext())) {
+      // WebSocket 未接続（open イベント前に SyncTimer が先着した場合）→ 次 tick で再試行
+      this._waitingForFrame = false;
+    }
   }
 
   // ── 一時停止 / 再開 ────────────────────────────────────────────
