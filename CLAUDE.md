@@ -69,3 +69,25 @@ static/
 
 1. `sort_algorithms.py` にジェネレータ関数を実装（`yield` でフレームを1つずつ出力）
 2. `main.py` の `ALGORITHMS` リストに登録
+
+---
+
+## 現在のファイルバージョン
+
+| ファイル | バージョン |
+|---|---|
+| `static/js/app.js` | **v19** |
+| `static/js/canvas.js` | **v9** |
+| `static/js/ws_client.js` | v10 |
+| `static/css/style.css` | v6 |
+
+---
+
+## 最近の変更履歴
+
+| 日付 | 内容 |
+|---|---|
+| 2026-05-10 | タッチドラッグ軸ロックバグ修正 — `onMove` 内に `preventDefault()` 追加 (app.js v18→v19) |
+| 2026-05-10 | タッチデバイス対応 — `resize-handle` 追加、`touch-action: none`、touch イベントリスナー追加 (app.js v17→v18, style.css v5→v6) |
+| 2026-05-07 | プロジェクトスコープ整理（開発対象として継続） |
+| 2026-05-03 | カラーテーマ全面対応 (dark/bright/hc/hcbright) |
