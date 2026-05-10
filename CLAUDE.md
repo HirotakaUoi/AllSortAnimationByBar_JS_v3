@@ -76,7 +76,7 @@ static/
 
 | ファイル | バージョン |
 |---|---|
-| `static/js/app.js` | **v19** |
+| `static/js/app.js` | **v21** |
 | `static/js/canvas.js` | **v9** |
 | `static/js/ws_client.js` | v10 |
 | `static/css/style.css` | v6 |
@@ -87,7 +87,7 @@ static/
 
 | 日付 | 内容 |
 |---|---|
-| 2026-05-10 | タッチドラッグ軸ロックバグ修正 — `onMove` 内に `preventDefault()` 追加 (app.js v18→v19) |
-| 2026-05-10 | タッチデバイス対応 — `resize-handle` 追加、`touch-action: none`、touch イベントリスナー追加 (app.js v17→v18, style.css v5→v6) |
+| 2026-05-11 | drag/resize を Pointer Events API に統一 — `setPointerCapture` で軸ロック完全解消 (app.js v20→v21) |
+| 2026-05-10 | タッチドラッグ軸ロックバグ修正 / スナップをリリース時のみ適用 / タッチデバイス対応 (app.js v17→v20) |
 | 2026-05-07 | プロジェクトスコープ整理（開発対象として継続） |
 | 2026-05-03 | カラーテーマ全面対応 (dark/bright/hc/hcbright) |
