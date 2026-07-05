@@ -25,8 +25,6 @@ const THEMES = [
     indexLabelColor: "#667",
     lineColor:       "rgba(255,100,100,.75)",
     arrowColor:      "#FF4444",
-    finishedOverlay: "rgba(0,0,0,.55)",
-    finishedText:    "#FFD700",
   },
   {
     key:  "bright",
@@ -44,8 +42,6 @@ const THEMES = [
     indexLabelColor: "#99a",
     lineColor:       "rgba(200,50,50,.7)",
     arrowColor:      "#d93025",
-    finishedOverlay: "rgba(255,255,255,.6)",
-    finishedText:    "#1a3080",
   },
   {
     key:  "hc",
@@ -63,8 +59,6 @@ const THEMES = [
     indexLabelColor: "#aaaaaa",
     lineColor:       "rgba(255,60,60,.9)",
     arrowColor:      "#ff2200",
-    finishedOverlay: "rgba(0,0,0,.7)",
-    finishedText:    "#ffff00",
   },
   {
     key:  "hcbright",
@@ -82,8 +76,6 @@ const THEMES = [
     indexLabelColor: "#555566",
     lineColor:       "rgba(180,0,0,.8)",
     arrowColor:      "#ee1100",
-    finishedOverlay: "rgba(255,255,255,.65)",
-    finishedText:    "#003399",
   },
 ];
 
@@ -207,15 +199,9 @@ class SortCanvas {
       this._drawArrow(s, e, baseY, th.arrowColor);
     }
 
-    // ── 完了オーバーレイ ──
-    if (finished) {
-      ctx.fillStyle = th.finishedOverlay;
-      ctx.fillRect(0, 0, this.cw, this.ch);
-      ctx.fillStyle = th.finishedText;
-      ctx.font      = `bold ${Math.min(48, this.cw / 8)}px sans-serif`;
-      ctx.textAlign = "center";
-      ctx.fillText("完了!", this.cw / 2, this.ch / 2 + 14);
-    }
+    // 完了時の表示について:
+    // 「完了!」はバーの並びをdimして隠さないよう、キャンバス上には描かず
+    // コントロールパネル側のステータス表示 (status-done-badge) に任せる。
 
     return texts;
   }

@@ -182,7 +182,8 @@ function _applyTheme(key) {
   document.querySelectorAll(".panel").forEach(el => {
     const panel = el._panel;
     if (!panel) return;
-    if (panel.isRunning && panel.sortCanvas && panel._lastFrame) {
+    if (panel.sortCanvas && panel._lastFrame) {
+      // 完了後の最終状態もテーマ切替で消えないよう、最新フレームを保持したまま再描画
       panel.sortCanvas.draw(panel._lastFrame);
     } else if (panel._previewCache) {
       panel._drawPreviewFromData(panel._previewCache);
@@ -464,6 +465,7 @@ class SortPanel {
         <span class="status-algo">-</span>
         <span class="status-state">待機中</span>
         <span class="status-frames">フレーム: 0</span>
+        <span class="status-done-badge"></span>
       </div>
       <div class="resize-handle" title="リサイズ"></div>
     `;
@@ -812,6 +814,7 @@ class SortPanel {
     this._setBtns({ start: false, pause: true, stop: true, reset: false });
     this.el.querySelector(".status-algo").textContent = info.algo_name;
     this.el.querySelector(".text-overlay").textContent = "アニメーション開始...";
+    this._clearDoneBadge();
 
     // SyncTimer に登録して全パネル共通タイマーで進行
     SyncTimer.setIntervalMs(this._currentSpeedMs());
@@ -846,7 +849,25 @@ class SortPanel {
       this.el.classList.add("finished");
       this._setStatus("完了", "#44aa44");
       this._setBtns({ start: false, pause: false, stop: false, reset: true });
+      // 「完了!」はキャンバス上のバーをdimして隠さないよう、
+      // ステータスバーの固定背景色バッジにのみ表示する
+      this._showDoneBadge();
     }
+  }
+
+  _showDoneBadge() {
+    const badge = this.el.querySelector(".status-done-badge");
+    badge.textContent = "🎉 完了!";
+    badge.classList.remove("flash");
+    badge.classList.add("visible");
+    void badge.offsetWidth;
+    badge.classList.add("flash");
+  }
+
+  _clearDoneBadge() {
+    const badge = this.el.querySelector(".status-done-badge");
+    badge.textContent = "";
+    badge.classList.remove("visible", "flash");
   }
 
   // ── フレーム受信 ─────────────────────────────────────────────
@@ -917,6 +938,7 @@ class SortPanel {
     this._serverFinished = false;
     this.el.querySelector(".text-overlay").textContent = "（開始ボタンを押してください）";
     this.el.querySelector(".status-frames").textContent = "フレーム: 0";
+    this._clearDoneBadge();
     this.el.classList.remove("finished");
     this._setStatus("待機中", "#888");
     this._setBtns({ start: true, pause: false, stop: false, reset: false });

@@ -76,10 +76,10 @@ static/
 
 | ファイル | バージョン |
 |---|---|
-| `static/js/app.js` | **v21** |
-| `static/js/canvas.js` | **v9** |
+| `static/js/app.js` | **v22** |
+| `static/js/canvas.js` | **v10** |
 | `static/js/ws_client.js` | v10 |
-| `static/css/style.css` | v6 |
+| `static/css/style.css` | **v7** |
 
 ---
 
@@ -87,6 +87,7 @@ static/
 
 | 日付 | 内容 |
 |---|---|
+| 2026-07-03 | 完了時の全画面dim+中央大表示「完了!」を廃止。キャンバス上には一切描かず、ステータスバーの `status-done-badge` に固定背景色バッジ（テーマが変わっても視認性が落ちない）で表示するよう変更。表示時に短いフラッシュアニメーション(1.4秒)を付与。テーマ定義から未使用になった `finishedOverlay`/`finishedText` を削除。副次的に、テーマ切替時に実行中でないパネル（完了後含む）が最終フレームでなくプレビューに巻き戻るバグも発見・修正 (canvas.js v9→v10, app.js v21→v22, style.css v6→v7) |
 | 2026-05-11 | drag/resize を Pointer Events API に統一 — `setPointerCapture` で軸ロック完全解消 (app.js v20→v21) |
 | 2026-05-10 | タッチドラッグ軸ロックバグ修正 / スナップをリリース時のみ適用 / タッチデバイス対応 (app.js v17→v20) |
 | 2026-05-07 | プロジェクトスコープ整理（開発対象として継続） |
