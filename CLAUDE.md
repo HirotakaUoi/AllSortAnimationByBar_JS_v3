@@ -5,7 +5,7 @@ v2 に 3-way partition クイックソートと並列クイックソートを追
 ## 起動
 
 ```bash
-uvicorn main:app --reload --port 8003
+../run_server.sh . 8003   # このフォルダから（詳細はルート CLAUDE.md）
 ```
 
 ブラウザ: http://localhost:8003
@@ -87,6 +87,7 @@ static/
 
 | 日付 | 内容 |
 |---|---|
+| 2026-09-29 | 起動方式を変更（アプリのコード変更なし）— ルートの共通スクリプト `run_server.sh` 経由に統一。`.venv` を Dropbox で全マシン共有するため、Python を uv 管理の **3.14.4** に固定（`.python-version` は git 管理外、pyproject に `[tool.uv] python-preference = "only-managed"`）し、venv を relocatable で作り直した（Dropbox の2通りのパスどちらでも動く）。`.claude/launch.json` も `../run_server.sh . <port>` に変更。Python 3.14.4 で全アルゴリズムの完走を確認 |
 | 2026-07-17 | WebSocket keep-alive を追加 — 接続中は45秒間隔で `{"action":"ping"}` を送信し、Render 無料枠の「インバウンド通信15分無しでスピンダウン」による切断を防止（一時停止中も有効）。明示的な停止・完了・切断が無くても最大1時間で送信を打ち切る。サーバー側は未知 action を無視する既存実装のまま変更なし (ws_client.js v10→v11) |
 | 2026-07-03 | 完了時の全画面dim+中央大表示「完了!」を廃止。キャンバス上には一切描かず、ステータスバーの `status-done-badge` に固定背景色バッジ（テーマが変わっても視認性が落ちない）で表示するよう変更。表示時に短いフラッシュアニメーション(1.4秒)を付与。テーマ定義から未使用になった `finishedOverlay`/`finishedText` を削除。副次的に、テーマ切替時に実行中でないパネル（完了後含む）が最終フレームでなくプレビューに巻き戻るバグも発見・修正 (canvas.js v9→v10, app.js v21→v22, style.css v6→v7) |
 | 2026-05-11 | drag/resize を Pointer Events API に統一 — `setPointerCapture` で軸ロック完全解消 (app.js v20→v21) |
