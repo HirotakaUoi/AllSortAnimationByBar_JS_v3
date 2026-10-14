@@ -642,7 +642,9 @@ class SortPanel {
       return;
     }
 
-    if (this.isRunning && this.sortCanvas && this._lastFrame) {
+    if (this.sortCanvas && this._lastFrame) {
+      // 実行中に加え、完了後・停止後も最後に表示したフレームを描き直す
+      // （以前は isRunning を条件にしていたため、完了後にリサイズすると初期配列に戻っていた）
       this.sortCanvas.canvas   = canvas;
       this.sortCanvas.ctx      = canvas.getContext("2d");
       this.sortCanvas.numItems = this.numItems;
