@@ -650,16 +650,15 @@ class SortPanel {
       this.sortCanvas.numItems = this.numItems;
       this.sortCanvas.dataMax  = this.dataMax;
       this.sortCanvas.draw(this._lastFrame);
+    } else if (this._previewCache) {
+      // リサイズ時はキャッシュを再描画するだけ（新規生成して共有データを上書きしない）。
+      // 開始直後で最初のフレームがまだ届いていないときも、送信した初期データを描く
+      const pd = this._previewCache;
+      const sc = new SortCanvas(canvas, pd.numItems, pd.dataMax);
+      sc.draw({ data: pd.data, color: pd.color,
+                arrows: [], texts: [], lines: [], bars: [], finished: false });
     } else if (!this.isRunning) {
-      // リサイズ時はキャッシュを再描画するだけ（新規生成して共有データを上書きしない）
-      if (this._previewCache) {
-        const pd = this._previewCache;
-        const sc = new SortCanvas(canvas, pd.numItems, pd.dataMax);
-        sc.draw({ data: pd.data, color: pd.color,
-                  arrows: [], texts: [], lines: [], bars: [], finished: false });
-      } else {
-        this._drawPreviewOnCanvas(canvas, w, h);
-      }
+      this._drawPreviewOnCanvas(canvas, w, h);
     }
   }
 
@@ -717,6 +716,9 @@ class SortPanel {
   _drawPreviewOnCanvas(canvas, w, h) {
     const pd = this._generatePreviewData();
     this._previewCache = pd;
+    // 表示をプレビューに置き換えたので、前回の終了フレームを破棄する
+    // （残すとリサイズ・テーマ切替・次の開始直後に前回の終了状態が描き直される）
+    this._lastFrame = null;
     const sc = new SortCanvas(canvas, pd.numItems, pd.dataMax);
     sc.draw({ data: pd.data, color: pd.color,
               arrows: [], texts: [], lines: [], bars: [], finished: false });
@@ -745,6 +747,7 @@ class SortPanel {
       canvas.height = h;
     }
     this._previewCache = ownPd;
+    this._lastFrame    = null;   // 前回の終了フレームを破棄（_drawPreviewOnCanvas と同じ理由）
     const sc = new SortCanvas(canvas, ownPd.numItems, ownPd.dataMax);
     sc.draw({ data: ownPd.data, color: ownPd.color,
               arrows: [], texts: [], lines: [], bars: [], finished: false });
@@ -805,6 +808,9 @@ class SortPanel {
     this._pendingFrames  = [];
     this._serverFinished = false;
     this._frameCount     = 0;
+    // 前回の終了フレームを破棄する。残っていると、最初のフレームが届く前に
+    // パネルのサイズが変わったとき（完了バッジの消去など）前回の終了状態が一瞬描かれる
+    this._lastFrame      = null;
 
     const canvas = this.el.querySelector(".sort-canvas");
     this.sortCanvas = new SortCanvas(canvas, this.numItems, this.dataMax);
