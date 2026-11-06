@@ -58,7 +58,7 @@ const SyncTimer = {
   _tick() {
     // 一時停止中でないパネルのみ、バッファから1フレーム取り出して表示
     this._panels.forEach(p => {
-      if (p.isPaused) return;
+      if (p.isPaused || p._stepMode) return;   // ステップ実行中は Space / Enter で進める
       const frame = p._pendingFrames?.shift();
       if (frame) p._displayFrame(frame);
     });
@@ -139,6 +139,117 @@ async function loadMeta() {
   conditions = await cRes.json();
 }
 
+// ===== 速度スライダーの目盛り（パネルとヘッダーの速度スライダーで共通） =====
+// スライダー値は 1〜200（index.html と パネルのテンプレートの range の min・max と同じ）。
+//   左端 1 = ステップ実行（Space / Enter で 1 コマ進む）
+//   20 = ×0.1、40 = ×0.5、80 = ×1、120 = ×2、160 = ×5、右端 200 = ×10。その間は等比で結ぶ
+//   （×1 = 100 ms/フレーム、×0.5 = 200 ms、×0.1 = 1000 ms、×10 = 10 ms。2〜19 は ×0.1 のまま）
+// マウス・タッチでドラッグしている間は、これらの位置の近くでつまみが止まる（吸着する）。目盛りは <datalist> で表示。
+// 表示の倍率は実際の 1 フレームの時間から求める（倍率 = 0.1 秒 ÷ 1 フレームの秒数）。
+// SearchBar・ArrayAnimation・AAforDataStructures と同じ目盛り。
+// 開始時・スライダー操作時・倍率表示はすべてここを通す（開始直後とスライダー操作後の速度をずらさない）
+const SPEED_SLIDER_MAX  = 200;   // 右端
+const SPEED_MS_X1       = 100;   // ×1 の ms/フレーム
+const SPEED_STOPS       = [[20, 0.1], [40, 0.5], [80, 1], [120, 2], [160, 5], [200, 10]];   // [スライダー値, 倍率]
+const SPEED_STEP_POS    = 1;     // 左端 = ステップ実行
+const SPEED_STEP_MS     = 50;    // ステップ実行中、サーバーが 1 コマ送ったあとに待つ時間（この間に一時停止が届く）
+const SPEED_STEP_STATUS = "ステップ実行（Space / Enter で 1 コマ）";
+const SPEED_SNAP_PX     = 10;    // 止まる位置までこの距離（px）以内なら吸着する
+
+function _speedIsStep(sliderVal) {
+  return Number(sliderVal) <= SPEED_STEP_POS;
+}
+
+function _speedMult(sliderVal) {
+  const v = Math.min(Math.max(Number(sliderVal), SPEED_STOPS[0][0]), SPEED_SLIDER_MAX);
+  for (let i = 1; i < SPEED_STOPS.length; i++) {          // 隣り合う止まる位置の間を等比で結ぶ
+    const [a, ma] = SPEED_STOPS[i - 1], [b, mb] = SPEED_STOPS[i];
+    if (v <= b) return ma * (mb / ma) ** ((v - a) / (b - a));
+  }
+  return SPEED_STOPS[SPEED_STOPS.length - 1][1];
+}
+
+/** ms/フレーム（整数） */
+function _speedMs(sliderVal) {
+  if (_speedIsStep(sliderVal)) return SPEED_STEP_MS;
+  return Math.round(SPEED_MS_X1 / _speedMult(sliderVal));
+}
+
+/** 表示の倍率（実際の 1 フレームの時間から求める）。×0.5・×1・×2・×5・×10 のように末尾の 0 は省く */
+function _speedLabel(sliderVal) {
+  if (_speedIsStep(sliderVal)) return "ステップ";
+  const m = SPEED_MS_X1 / _speedMs(sliderVal);
+  const s = m.toFixed(m < 1 ? 2 : 1).replace(/\.?0+$/, "");   // 1 未満は小数 2 桁まで（×0.25 など）
+  return `×${s}`;
+}
+
+// 目盛りの <datalist> を 1 つだけ作り、すべての速度スライダーで共有する
+function _speedTicksId() {
+  const id = "speed-ticks";
+  if (!document.getElementById(id)) {
+    const dl = document.createElement("datalist");
+    dl.id = id;
+    dl.appendChild(new Option("ステップ", SPEED_STEP_POS));
+    SPEED_STOPS.forEach(([v, m]) => dl.appendChild(new Option(`×${m}`, v)));
+    document.body.appendChild(dl);
+  }
+  return id;
+}
+
+// 吸着はドラッグ中（マウス・タッチ）だけ。キーボードの矢印では 1 目盛りずつ動かせる
+let _speedDragEl = null;
+window.addEventListener("pointerup",     () => { _speedDragEl = null; });
+window.addEventListener("pointercancel", () => { _speedDragEl = null; });
+
+/** 速度スライダーに目盛りと吸着を付ける（input の処理では _snapSpeed を通す） */
+function _setupSpeedSlider(rng) {
+  rng.setAttribute("list", _speedTicksId());
+  rng.addEventListener("pointerdown", () => { _speedDragEl = rng; });
+}
+
+/** ドラッグ中に止まる位置の近くなら、つまみをそこへ寄せる。寄せた後の値を返す */
+function _snapSpeed(rng) {
+  const v = Number(rng.value);
+  if (_speedDragEl !== rng) return v;
+  const set = (d) => { rng.value = d; return d; };
+  const x01 = SPEED_STOPS[0][0];
+  if (v < x01) return set(v - SPEED_STEP_POS < x01 - v ? SPEED_STEP_POS : x01);   // ステップと ×0.1 の間は近い方へ
+  const min = Number(rng.min) || 1;
+  const max = Number(rng.max) || SPEED_SLIDER_MAX;
+  const pxPerUnit = rng.getBoundingClientRect().width / (max - min);
+  const tol = Math.max(2, SPEED_SNAP_PX / (pxPerUnit || 1));
+  let best = null;
+  for (const [d] of SPEED_STOPS) {
+    if (Math.abs(v - d) <= tol && (best === null || Math.abs(v - d) < Math.abs(v - best))) best = d;
+  }
+  return best === null ? v : set(best);
+}
+
+// ステップ実行: Space / Enter で、ステップ実行中のすべてのパネルを 1 コマ進める
+// （文字の入力欄にいるときは使わない。ボタンにフォーカスがあっても、そのボタンは押さない）
+function _stepPanels() {
+  return [...document.querySelectorAll(".panel")].map(el => el._panel)
+    .filter(p => p && p.isRunning && p._stepMode);
+}
+function _isTextEntry(el) {
+  return !!el?.closest?.('textarea, select, [contenteditable=""], [contenteditable="true"], ' +
+    'input:not([type=range]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit])');
+}
+let _stepKeyUsed = false;
+document.addEventListener("keydown", (ev) => {
+  if ((ev.key !== " " && ev.key !== "Enter") || ev.isComposing || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+  if (_isTextEntry(ev.target)) return;
+  const panels = _stepPanels();
+  if (!panels.length) return;
+  ev.preventDefault();             // ボタンのクリックやページのスクロールにしない
+  _stepKeyUsed = true;
+  panels.forEach(p => p.stepOnce());
+});
+document.addEventListener("keyup", (ev) => {   // Space はキーを離したときにボタンが押されるので、それも止める
+  if (ev.key === " " && _stepKeyUsed) ev.preventDefault();
+  if (ev.key === " " || ev.key === "Enter") _stepKeyUsed = false;
+});
+
 // ===== 全パネル一括設定 ============================================
 
 function _setupGlobalControls() {
@@ -151,10 +262,9 @@ function _setupGlobalControls() {
 
   const gSpeed    = document.getElementById("global-speed");
   const gSpeedVal = document.getElementById("global-speed-val");
+  _setupSpeedSlider(gSpeed);
   gSpeed.addEventListener("input", () => {
-    const v    = Number(gSpeed.value);
-    const mult = Math.round(v / 80 * 10) / 10;
-    gSpeedVal.textContent = `×${mult.toFixed(1)}`;
+    gSpeedVal.textContent = _speedLabel(_snapSpeed(gSpeed));
   });
 }
 
@@ -438,11 +548,11 @@ class SortPanel {
         <label>初期状態
           <select class="sel-cond"></select>
         </label>
-        <div class="speed-group">
+        <div class="speed-group speed-main">
           <label>速度</label>
           <input type="range" class="rng-speed" min="1" max="200" value="80"
-                 title="大きいほど速い">
-          <span class="speed-value">×1.0</span>
+                 title="大きいほど速い。左端はステップ実行（Space / Enter で 1 コマ）。ステップ・×0.1・×0.5・×1・×2・×5・×10 で止まる">
+          <span class="speed-value">×1</span>
         </div>
       </div>
 
@@ -513,8 +623,9 @@ class SortPanel {
     q(".btn-stop")   .addEventListener("click", () => this.stop());
     q(".btn-reset")  .addEventListener("click", () => this.reset());
 
+    _setupSpeedSlider(q(".rng-speed"));
     q(".rng-speed").addEventListener("input", (ev) => {
-      this._applySpeed(Number(ev.target.value));
+      this._applySpeed(_snapSpeed(ev.target));
     });
 
     // 並列数スライダー
@@ -753,18 +864,50 @@ class SortPanel {
               arrows: [], texts: [], lines: [], bars: [], finished: false });
   }
 
-  // ── スピード変換 ─────────────────────────────────────────────
+  // ── スピード変換（目盛りはファイル先頭の _speedMult / _speedMs） ──
   _applySpeed(sliderVal) {
-    const ms   = Math.round(200 / sliderVal * 10);   // ms/フレーム
-    const mult = Math.round(sliderVal / 80 * 10) / 10;
-    this.el.querySelector(".speed-value").textContent = `×${mult.toFixed(1)}`;
-    this._speed = ms / 1000;
-    SyncTimer.setIntervalMs(ms);
+    this.el.querySelector(".speed-value").textContent = _speedLabel(sliderVal);
+    const step = _speedIsStep(sliderVal);
+    if (!step) {                      // ステップ実行では共通タイマーの間隔を変えない（他のパネルに影響するため）
+      const ms = _speedMs(sliderVal);
+      this._speed = ms / 1000;
+      SyncTimer.setIntervalMs(ms);
+    }
+    this._setStepMode(step);
   }
 
   _currentSpeedMs() {
-    const v = Number(this.el.querySelector(".rng-speed").value);
-    return Math.round(200 / v * 10);
+    return _speedMs(this.el.querySelector(".rng-speed").value);
+  }
+
+  // ── ステップ実行（速度スライダーが左端。Space / Enter で 1 コマ進む） ──
+  // 共通タイマーはこのパネルを飛ばし、キーでためてあるコマを 1 つ表示する
+  stepOnce() {
+    if (!this.isRunning || !this._stepMode) return;
+    const frame = this._pendingFrames?.shift();
+    if (frame) this._displayFrame(frame);
+  }
+
+  _setStepMode(on) {
+    if (on === !!this._stepMode) return;
+    this._stepMode = on;
+    if (!this.isRunning) return;
+    if (on) {
+      if (this.isPaused) {            // 一時停止中にステップ実行へ: サーバーからの受信は続ける
+        this.isPaused = false;
+        this.client?.resume();
+        this.el.querySelector(".btn-pause").textContent = "⏸ 一時停止";
+      }
+      this._showStepUi();
+    } else {
+      this._setBtns({ start: false, pause: true, stop: true, reset: false });
+      this._setStatus("実行中", "#90caf9");
+    }
+  }
+
+  _showStepUi() {
+    this._setBtns({ start: false, pause: false, stop: true, reset: false });
+    this._setStatus(SPEED_STEP_STATUS, "#FFD700");
   }
 
   // ── 開始 ────────────────────────────────────────────────────────
@@ -825,7 +968,10 @@ class SortPanel {
     this._clearDoneBadge();
 
     // SyncTimer に登録して全パネル共通タイマーで進行
-    SyncTimer.setIntervalMs(this._currentSpeedMs());
+    // ステップ実行（速度スライダーが左端）なら 1 コマ目を表示したあと Space / Enter を待つ
+    this._stepMode = _speedIsStep(this.el.querySelector(".rng-speed").value);
+    if (this._stepMode) this._showStepUi();
+    else SyncTimer.setIntervalMs(this._currentSpeedMs());
     SyncTimer.register(this);
 
     this.client = new AnimationClient(
@@ -911,6 +1057,7 @@ class SortPanel {
   // ── 一時停止 / 再開 ────────────────────────────────────────────
   togglePause() {
     if (!this.isRunning) return;
+    if (this._stepMode) return;   // ステップ実行中は Space / Enter で進める（一時停止ボタンは使わない）
     this.isPaused = !this.isPaused;
     const btn = this.el.querySelector(".btn-pause");
     if (this.isPaused) {

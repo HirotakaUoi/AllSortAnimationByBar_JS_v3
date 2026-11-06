@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ソートアルゴリズム アニメーション</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=7">
+  <link rel="stylesheet" href="/static/css/style.css?v=9">
 </head>
 <body>
 
@@ -45,8 +45,8 @@
       </label>
       <div class="speed-group">
         <label>速度</label>
-        <input type="range" id="global-speed" min="1" max="200" value="80" title="大きいほど速い">
-        <span id="global-speed-val">×1.0</span>
+        <input type="range" id="global-speed" min="1" max="200" value="80" title="大きいほど速い。左端はステップ実行（Space / Enter で 1 コマ）。ステップ・×0.1・×0.5・×1・×2・×5・×10 で止まる">
+        <span id="global-speed-val">×1</span>
       </div>
       <button id="btn-apply-global" class="btn btn-secondary">↕ 全パネルへ適用</button>
     </div>
@@ -58,6 +58,6 @@
   <!-- ===== スクリプト ===== -->
   <script src="/static/js/canvas.js?v=10"></script>
   <script src="/static/js/ws_client.js?v=11"></script>
-  <script src="/static/js/app.js?v=24"></script>
+  <script src="/static/js/app.js?v=28"></script>
 </body>
 </html>
