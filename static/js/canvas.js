@@ -79,7 +79,7 @@ const THEMES = [
   },
 ];
 
-let _currentThemeKey = "dark";
+let _currentThemeKey = "bright";   // 初期テーマは明るめ（index.html の <body data-theme> と ☀ ボタンの theme-active も同じにする）
 
 /** 現在のテーマオブジェクトを返す */
 function getCanvasTheme() {
