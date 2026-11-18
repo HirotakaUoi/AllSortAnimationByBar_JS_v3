@@ -280,7 +280,7 @@ def quick_sort(data, color, option=None):
                              texts=texts, lines=lines, bars=[i, last])
             data[i], data[last] = data[last], data[i]
             color[i], color[last] = color[last], color[i]
-            color[i] = "g"; color[last] = "b"
+            color[last] = "b"; color[i] = "g"   # i == last（ピボットが範囲の最大）でも緑を残す
             yield make_frame(data, color, arrows=[[i, last]],
                              texts=texts, lines=lines, bars=[i, last])
             stack.append((i + 1, last))
@@ -307,11 +307,10 @@ def _gen_partition(data, color, first, last):
     """
     if first >= last:
         # 要素が1個以下 → 即確定
+        # 空の範囲 (first > last) では何も塗らない（隣の確定済みの要素を上書きしない）
         if first == last:
             color[first] = "g"
-        if last > 0:
-            color[last] = "gray"
-        yield (True, [], {"arrows": [], "texts": [], "lines": [], "bars": ([last] if last >= 0 else [])})
+        yield (True, [], {"arrows": [], "texts": [], "lines": [], "bars": ([first] if first == last else [])})
         return
 
     pivot   = data[last]
@@ -350,7 +349,7 @@ def _gen_partition(data, color, first, last):
     yield (False, [], {"arrows": [[i, last]], "texts": texts, "lines": lines, "bars": [i, last]})
     data[i], data[last] = data[last], data[i]
     color[i], color[last] = color[last], color[i]
-    color[i] = "g"; color[last] = "b"
+    color[last] = "b"; color[i] = "g"   # i == last（ピボットが範囲の最大）でも緑を残す
 
     # 次の処理範囲を返す
     parts = []
@@ -873,11 +872,16 @@ def intro_sort(data, color):
     """イントロソート: クイックソート + ヒープソートのハイブリッド
     再帰深さが 2*floor(log2(N)) を超えたサブ配列をヒープソートに切り替える。
 
+    ヒープソート部分は heap_sort と同じ手順（HeapSortAnimation.py の
+    insertHeap / rebuildHeap）。
+
     色の意味:
-      r  = ピボット / sift_down 対象ノード
-      y  = 右走査ポインタ / 比較する子ノード
-      m  = 左走査ポインタ / ヒープソート切替対象の範囲
-      g  = ソート確定済み
+      r    = ピボット / 交換する 2 つ（ヒープソート、交換前）
+      y    = 右走査ポインタ / 比べる相手（ヒープソートの親・子）
+      m    = 左走査ポインタ / ヒープソート切替対象の範囲 / 大きい方の子
+      c    = ピボット確定 / 上げ下げしている要素（ヒープソート）
+      gray = まだヒープに加えていない要素（ヒープソート）
+      g    = ソート確定済み
     """
     n = len(data)
     if n <= 1:
@@ -886,59 +890,105 @@ def intro_sort(data, color):
 
     max_depth = 2 * int(math.log2(n))
 
-    def sift_down_range(base, root, end, phase):
-        while True:
-            largest = root
-            pos = root - base
-            lc  = base + 2 * pos + 1
-            rc  = base + 2 * pos + 2
-
-            cands = [root]
-            color[root] = "r"
-            if lc <= end: color[lc] = "y"; cands.append(lc)
-            if rc <= end: color[rc] = "y"; cands.append(rc)
-            yield make_frame(data, color, texts=[phase], bars=cands)
-
-            if lc <= end and data[lc] > data[largest]: largest = lc
-            if rc <= end and data[rc] > data[largest]: largest = rc
-
-            if lc <= end: color[lc] = "b"
-            if rc <= end: color[rc] = "b"
-
-            if largest == root:
-                color[root] = "b"
-                yield make_frame(data, color, texts=[phase], bars=[root])
-                break
-
-            color[largest] = "y"
-            yield make_frame(data, color, arrows=[[root, largest]],
-                             texts=[phase], bars=[root, largest])
-            data[root], data[largest] = data[largest], data[root]
-            color[root], color[largest] = color[largest], color[root]
-            yield make_frame(data, color, texts=[phase], bars=[root, largest])
-            color[root] = "b"
-            root = largest
+    def hs_swap(i, j, label):
+        """交換の前後を 2 フレームで見せる（色も入れ替える）"""
+        ci, cj = color[i], color[j]
+        color[i] = color[j] = "r"
+        yield make_frame(data, color, arrows=[[i, j]],
+                         texts=[f"{label}  [{i}]={data[i]} ⇄ [{j}]={data[j]}"],
+                         bars=[i, j])
+        data[i], data[j] = data[j], data[i]
+        color[i], color[j] = cj, ci
+        yield make_frame(data, color, arrows=[[i, j]],
+                         texts=[f"{label}  交換後 [{i}]={data[i]}  [{j}]={data[j]}"],
+                         bars=[i, j])
 
     def heap_sort_range(first, last):
+        """[first..last] のヒープソート — heap_sort と同じ手順
+        (HeapSortAnimation.py の insertHeap / rebuildHeap)。
+        ヒープ内の位置 p (0 始まり) は配列の first + p。"""
         size = last - first + 1
-        for i in range(first + size // 2 - 1, first - 1, -1):
-            yield from sift_down_range(first, i, last,
-                                       f"HS構築 [{first}..{last}]  node={i}")
-        for end in range(last, first, -1):
-            color[first] = "r"; color[end] = "y"
-            yield make_frame(data, color, arrows=[[first, end]],
-                             texts=[f"HS [{first}..{last}]  最大 {data[first]} → [{end}]"],
-                             bars=[first, end])
-            data[first], data[end] = data[end], data[first]
-            color[first], color[end] = color[end], color[first]
-            color[end] = "g"
+        hs = f"HS [{first}..{last}]"
+
+        # ─── ヒープへの追加（insertHeap）───
+        for k in range(first + 1, last + 1): color[k] = "gray"
+        yield make_frame(data, color,
+                         texts=[f"{hs}  ヒープ作成: [{first}] だけのヒープから始める"],
+                         bars=[first])
+        for q in range(1, size):
+            ph = f"{hs}  ヒープへ追加 [{first + q}]"
+            p = q
+            color[first + p] = "c"
             yield make_frame(data, color,
-                             texts=[f"HS [{first}..{last}]  [{end}] 確定"],
-                             bars=[first, end])
+                             texts=[f"{ph}  値 {data[first + p]} を末尾に追加"],
+                             bars=[first + p])
+            while p > 0:
+                pp = (p - 1) // 2
+                i, par = first + p, first + pp
+                color[par] = "y"
+                yield make_frame(data, color, arrows=[[par, i]],
+                                 texts=[f"{ph}  子 [{i}]={data[i]} と 親 [{par}]={data[par]} を比較"],
+                                 bars=[i, par])
+                if data[i] > data[par]:
+                    yield from hs_swap(i, par, f"{ph}  子 > 親 → 交換")
+                    color[i] = "b"
+                    p = pp
+                else:
+                    color[par] = "b"
+                    yield make_frame(data, color,
+                                     texts=[f"{ph}  子 ≤ 親 → 止まる"], bars=[i])
+                    break
+            color[first + p] = "b"
+            yield make_frame(data, color,
+                             texts=[f"{ph}  完了  ヒープ [{first}..{first + q}]"],
+                             bars=[first + p])
+
+        # ─── 最大値の取り出しと作り直し（rebuildHeap）───
+        for hsize in range(size - 1, 0, -1):
+            end = first + hsize
+            yield from hs_swap(first, end, f"{hs}  最大値 [{first}] を末尾 [{end}] へ")
+            color[end] = "g"
             color[first] = "b"
-            if end > first + 1:
-                yield from sift_down_range(first, first, end - 1,
-                                           f"HS再構築 [{first}..{end-1}]")
+            yield make_frame(data, color, texts=[f"{hs}  [{end}] 確定"], bars=[end])
+            if hsize <= 1:
+                break
+            ph = f"HS 作り直し [{first}..{end - 1}]"
+            p = 0
+            color[first] = "c"
+            while True:
+                lq, rq = 2 * p + 1, 2 * p + 2
+                i, lc, rc = first + p, first + lq, first + rq
+                if rq < hsize:
+                    color[lc] = color[rc] = "y"
+                    yield make_frame(data, color, arrows=[[lc, rc]],
+                                     texts=[f"{ph}  2 つの子 [{lc}]={data[lc]} と [{rc}]={data[rc]} を比較"],
+                                     bars=[lc, rc])
+                    ch, other = (lc, rc) if data[lc] > data[rc] else (rc, lc)
+                    color[other] = "b"
+                    color[ch] = "m"
+                    yield make_frame(data, color,
+                                     texts=[f"{ph}  大きい方の子は [{ch}]={data[ch]}"],
+                                     bars=[ch])
+                elif lq < hsize:
+                    ch = lc
+                    color[ch] = "m"
+                else:
+                    break
+                yield make_frame(data, color, arrows=[[i, ch]],
+                                 texts=[f"{ph}  親 [{i}]={data[i]} と 子 [{ch}]={data[ch]} を比較"],
+                                 bars=[i, ch])
+                if data[ch] > data[i]:
+                    yield from hs_swap(i, ch, f"{ph}  子 > 親 → 交換")
+                    color[i] = "b"
+                    p = ch - first
+                else:
+                    color[ch] = "b"
+                    yield make_frame(data, color,
+                                     texts=[f"{ph}  子 ≤ 親 → 止まる"], bars=[i])
+                    break
+            color[first + p] = "b"
+            yield make_frame(data, color, texts=[f"{ph}  完了"], bars=[first + p])
+
         color[first] = "g"
         yield make_frame(data, color, bars=[first])
 
@@ -1025,7 +1075,7 @@ def intro_sort(data, color):
                              texts=texts, lines=lines, bars=[i, last])
             data[i], data[last] = data[last], data[i]
             color[i], color[last] = color[last], color[i]
-            color[i] = "g"; color[last] = "b"
+            color[last] = "b"; color[i] = "g"   # i == last（ピボットが範囲の最大）でも緑を残す
             yield make_frame(data, color, arrows=[[i, last]],
                              texts=texts, lines=lines, bars=[i, last])
 
